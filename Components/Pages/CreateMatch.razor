@@ -1,0 +1,165 @@
+@page "/matches/create"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using System.ComponentModel.DataAnnotations
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Schedule Match</PageTitle>
+
+@if (tournaments is null || teams is null)
+{
+    <p>Loading match options...</p>
+}
+else if (tournaments.Count == 0 || teams.Count < 2)
+{
+    <section class="empty-state">
+        <h2>Register teams first</h2>
+        <p>A match requires at least two teams and one tournament.</p>
+        <a class="btn btn-primary" href="/teams/create">Add team</a>
+    </section>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Fixture management</p>
+        <h1 class="page-title">Schedule match</h1>
+        <p class="page-subtitle">Create a fixture between two teams in the same tournament.</p>
+
+        <EditForm Model="model" OnValidSubmit="SaveMatch" class="tournament-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div class="form-field form-field-wide">
+                    <label for="tournament">Tournament</label>
+                    <InputSelect id="tournament" @bind-Value="model.TournamentId">
+                        @foreach (var tournament in tournaments)
+                        {
+                            <option value="@tournament.Id">@tournament.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="home-team">Home team</label>
+                    <InputSelect id="home-team" @bind-Value="model.HomeTeamId">
+                        @foreach (var team in teams)
+                        {
+                            <option value="@team.Id">@team.Name - @team.Tournament</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="away-team">Away team</label>
+                    <InputSelect id="away-team" @bind-Value="model.AwayTeamId">
+                        @foreach (var team in teams)
+                        {
+                            <option value="@team.Id">@team.Name - @team.Tournament</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="date">Match date</label>
+                    <InputDate id="date" @bind-Value="model.MatchDate" />
+                </div>
+                <div class="form-field">
+                    <label for="location">Location</label>
+                    <InputText id="location" @bind-Value="model.Location" />
+                    <ValidationMessage For="@(() => model.Location)" />
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="validation-message">@errorMessage</p>
+            }
+            <div class="form-actions">
+                <a class="btn btn-secondary" href="/matches">Cancel</a>
+                <button class="btn btn-primary" type="submit">Schedule match</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private List<Tournament>? tournaments;
+    private List<TeamOption>? teams;
+    private string? errorMessage;
+    private readonly MatchInput model = new()
+    {
+        MatchDate = DateTime.Today,
+        Status = MatchStatus.Scheduled
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.StartDate).ToListAsync();
+        teams = await db.Teams.AsNoTracking().Include(item => item.Tournament).OrderBy(item => item.Name)
+            .Select(item => new TeamOption { Id = item.Id, Name = item.Name, TournamentId = item.TournamentId, Tournament = item.Tournament.Name })
+            .ToListAsync();
+
+        if (tournaments.Count > 0)
+        {
+            model.TournamentId = tournaments[0].Id;
+        }
+
+        if (teams.Count > 1)
+        {
+            model.HomeTeamId = teams[0].Id;
+            model.AwayTeamId = teams[1].Id;
+        }
+    }
+
+    private async Task SaveMatch()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (model.HomeTeamId == model.AwayTeamId)
+        {
+            errorMessage = "Home and away teams must be different.";
+            return;
+        }
+
+        var validTeams = await db.Teams.CountAsync(team => team.TournamentId == model.TournamentId
+            && (team.Id == model.HomeTeamId || team.Id == model.AwayTeamId));
+        if (validTeams != 2)
+        {
+            errorMessage = "Both selected teams must belong to the selected tournament.";
+            return;
+        }
+
+        db.Matches.Add(new Match
+        {
+            TournamentId = model.TournamentId,
+            HomeTeamId = model.HomeTeamId,
+            AwayTeamId = model.AwayTeamId,
+            MatchDate = model.MatchDate,
+            Location = string.IsNullOrWhiteSpace(model.Location) ? null : model.Location,
+            Status = MatchStatus.Scheduled
+        });
+
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/matches");
+    }
+
+    private sealed class MatchInput
+    {
+        [Required] public int TournamentId { get; set; }
+        [Required] public int HomeTeamId { get; set; }
+        [Required] public int AwayTeamId { get; set; }
+        [Required] public DateTime MatchDate { get; set; }
+        [StringLength(200)] public string? Location { get; set; }
+        public MatchStatus Status { get; set; }
+    }
+
+    private sealed class TeamOption
+    {
+        public int Id { get; set; }
+        public int TournamentId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Tournament { get; set; } = string.Empty;
+    }
+}

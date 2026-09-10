@@ -1,0 +1,79 @@
+@page "/matches"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Matches</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Fixtures and results</p>
+        <h1 class="page-title">Matches</h1>
+        <p class="page-subtitle">View scheduled fixtures and completed scores.</p>
+    </div>
+    <AuthorizeView Roles="Administrator,Tournament Manager">
+        <Authorized>
+            <a class="btn btn-primary" href="/matches/create">Schedule match</a>
+        </Authorized>
+    </AuthorizeView>
+</div>
+
+@if (matches is null)
+{
+    <p>Loading matches...</p>
+}
+else if (matches.Count == 0)
+{
+    <section class="empty-state">
+        <h2>No matches yet</h2>
+        <p>Schedule a fixture after registering at least two teams.</p>
+    </section>
+}
+else
+{
+    <div class="match-grid">
+        @foreach (var match in matches)
+        {
+            <article class="match-card">
+                <div class="match-card-header">
+                    <span class="status-badge status-@match.Status.ToString().ToLowerInvariant()">@match.Status</span>
+                    <span>@match.MatchDate.ToString("MMM d, yyyy")</span>
+                </div>
+                <p class="eyebrow">@match.Tournament.Name · @match.Location</p>
+                <div class="match-scoreline">
+                    <strong>@match.HomeTeam.Name</strong>
+                    <span>@match.HomeScore - @match.AwayScore</span>
+                    <strong>@match.AwayTeam.Name</strong>
+                </div>
+                <AuthorizeView Roles="Administrator,Tournament Manager">
+                    <Authorized>
+                        <div class="card-actions">
+                            <a href="/matches/edit/@match.Id">Edit</a>
+                            <a href="/matches/delete/@match.Id">Delete</a>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private List<Match>? matches;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        matches = await db.Matches
+            .AsNoTracking()
+            .Include(match => match.Tournament)
+            .Include(match => match.HomeTeam)
+            .Include(match => match.AwayTeam)
+            .OrderBy(match => match.MatchDate)
+            .ThenBy(match => match.MatchTime)
+            .ToListAsync();
+    }
+}

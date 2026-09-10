@@ -1,0 +1,127 @@
+@page "/teams/edit/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using System.ComponentModel.DataAnnotations
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Edit Team</PageTitle>
+
+@if (model is null)
+{
+    <p>Loading team...</p>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Team management</p>
+        <h1 class="page-title">Edit team</h1>
+        <p class="page-subtitle">Update the team details and tournament assignment.</p>
+
+        <EditForm Model="model" OnValidSubmit="SaveTeam" class="tournament-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div class="form-field form-field-wide">
+                    <label for="name">Team name</label>
+                    <InputText id="name" @bind-Value="model.Name" />
+                    <ValidationMessage For="@(() => model.Name)" />
+                </div>
+                <div class="form-field">
+                    <label for="tournament">Tournament</label>
+                    <InputSelect id="tournament" @bind-Value="model.TournamentId">
+                        @foreach (var tournament in tournaments)
+                        {
+                            <option value="@tournament.Id">@tournament.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="logo">Logo URL</label>
+                    <InputText id="logo" @bind-Value="model.LogoUrl" />
+                    <ValidationMessage For="@(() => model.LogoUrl)" />
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="validation-message">@errorMessage</p>
+            }
+            <div class="form-actions">
+                <a class="btn btn-secondary" href="/teams">Cancel</a>
+                <button class="btn btn-primary" type="submit">Save changes</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private TeamInput? model;
+    private List<Tournament> tournaments = new();
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+        var team = await db.Teams.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+        if (team is not null)
+        {
+            model = new TeamInput
+            {
+                Name = team.Name,
+                LogoUrl = team.LogoUrl,
+                TournamentId = team.TournamentId
+            };
+        }
+    }
+
+    private async Task SaveTeam()
+    {
+        if (model is null)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var duplicateExists = await db.Teams.AnyAsync(team =>
+            team.Id != Id && team.TournamentId == model.TournamentId && team.Name == model.Name);
+        if (duplicateExists)
+        {
+            errorMessage = "A team with this name already exists in the selected tournament.";
+            return;
+        }
+
+        var teamToUpdate = await db.Teams.FindAsync(Id);
+        if (teamToUpdate is null)
+        {
+            Navigation.NavigateTo("/teams");
+            return;
+        }
+
+        teamToUpdate.Name = model.Name;
+        teamToUpdate.LogoUrl = string.IsNullOrWhiteSpace(model.LogoUrl) ? null : model.LogoUrl;
+        teamToUpdate.TournamentId = model.TournamentId;
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/teams");
+    }
+
+    private sealed class TeamInput
+    {
+        [Required, StringLength(150)]
+        public string Name { get; set; } = string.Empty;
+
+        [Required]
+        public int TournamentId { get; set; }
+
+        [Url, StringLength(500)]
+        public string? LogoUrl { get; set; }
+    }
+}

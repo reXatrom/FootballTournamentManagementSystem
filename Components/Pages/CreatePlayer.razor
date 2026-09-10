@@ -1,0 +1,166 @@
+@page "/players/create"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using System.ComponentModel.DataAnnotations
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Add Player</PageTitle>
+
+@if (teams is null)
+{
+    <p>Loading teams...</p>
+}
+else if (teams.Count == 0)
+{
+    <section class="empty-state">
+        <h2>Create a team first</h2>
+        <p>A player must belong to a team.</p>
+        <a class="btn btn-primary" href="/teams/create">Create team</a>
+    </section>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Roster management</p>
+        <h1 class="page-title">Add player</h1>
+        <p class="page-subtitle">Register a player and assign a position and jersey number.</p>
+
+        <EditForm Model="model" OnValidSubmit="SavePlayer" class="tournament-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="first-name">First name</label>
+                    <InputText id="first-name" @bind-Value="model.FirstName" />
+                    <ValidationMessage For="@(() => model.FirstName)" />
+                </div>
+                <div class="form-field">
+                    <label for="last-name">Last name</label>
+                    <InputText id="last-name" @bind-Value="model.LastName" />
+                    <ValidationMessage For="@(() => model.LastName)" />
+                </div>
+                <div class="form-field">
+                    <label for="team">Team</label>
+                    <InputSelect id="team" @bind-Value="model.TeamId">
+                        @foreach (var team in teams)
+                        {
+                            <option value="@team.Id">@team.Name - @team.Tournament</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="position">Position</label>
+                    <InputSelect id="position" @bind-Value="model.Position">
+                        @foreach (var position in Enum.GetValues<PlayerPosition>())
+                        {
+                            <option value="@position">@position</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="jersey-number">Jersey number</label>
+                    <InputNumber id="jersey-number" @bind-Value="model.JerseyNumber" />
+                    <ValidationMessage For="@(() => model.JerseyNumber)" />
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="validation-message">@errorMessage</p>
+            }
+
+            <div class="form-actions">
+                <a class="btn btn-secondary" href="/players">Cancel</a>
+                <button class="btn btn-primary" type="submit">Add player</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private List<TeamOption>? teams;
+    private string? errorMessage;
+    private readonly PlayerInput model = new()
+    {
+        Position = PlayerPosition.Midfielder,
+        JerseyNumber = 1
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        teams = await db.Teams
+            .AsNoTracking()
+            .Include(team => team.Tournament)
+            .OrderBy(team => team.Name)
+            .Select(team => new TeamOption
+            {
+                Id = team.Id,
+                Name = team.Name,
+                Tournament = team.Tournament.Name
+            })
+            .ToListAsync();
+
+        if (teams.Count > 0)
+        {
+            model.TeamId = teams[0].Id;
+        }
+    }
+
+    private async Task SavePlayer()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var duplicateExists = await db.Players.AnyAsync(player =>
+            player.TeamId == model.TeamId && player.JerseyNumber == model.JerseyNumber);
+
+        if (duplicateExists)
+        {
+            errorMessage = "That jersey number is already assigned on the selected team.";
+            return;
+        }
+
+        db.Players.Add(new Player
+        {
+            FirstName = model.FirstName,
+            LastName = model.LastName,
+            Position = model.Position,
+            JerseyNumber = model.JerseyNumber,
+            TeamId = model.TeamId
+        });
+
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/players");
+    }
+
+    private sealed class PlayerInput
+    {
+        [Required, StringLength(100)]
+        public string FirstName { get; set; } = string.Empty;
+
+        [Required, StringLength(100)]
+        public string LastName { get; set; } = string.Empty;
+
+        [Required]
+        public PlayerPosition Position { get; set; }
+
+        [Range(1, 99)]
+        public int JerseyNumber { get; set; }
+
+        [Required]
+        public int TeamId { get; set; }
+    }
+
+    private sealed class TeamOption
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Tournament { get; set; } = string.Empty;
+    }
+}

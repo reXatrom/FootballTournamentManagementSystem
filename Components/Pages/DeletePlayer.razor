@@ -1,0 +1,77 @@
+@page "/players/delete/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Delete Player</PageTitle>
+
+@if (player is null)
+{
+    <p>Loading player...</p>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Roster management</p>
+        <h1 class="page-title">Delete player</h1>
+        <p class="page-subtitle">Review this action before permanently removing the player.</p>
+        <section class="confirmation-panel">
+            <h2>@player.FirstName @player.LastName</h2>
+            <p>@player.Team.Name - @player.Position, #@player.JerseyNumber</p>
+            @if (hasRelatedData)
+            {
+                <p class="validation-message">This player cannot be deleted because they are referenced by match events. Remove those events first.</p>
+            }
+            else
+            {
+                <p>This player has no match events and can be safely deleted.</p>
+                <button class="btn btn-danger" @onclick="DeleteAsync">Delete player</button>
+            }
+            <a class="btn btn-secondary" href="/players">Cancel</a>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Player? player;
+    private bool hasRelatedData;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        player = await db.Players.AsNoTracking().Include(item => item.Team).SingleOrDefaultAsync(item => item.Id == Id);
+        if (player is not null)
+        {
+            hasRelatedData = await db.MatchEvents.AnyAsync(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var playerToDelete = await db.Players.FindAsync(Id);
+        if (playerToDelete is null)
+        {
+            Navigation.NavigateTo("/players");
+            return;
+        }
+
+        if (await db.MatchEvents.AnyAsync(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id))
+        {
+            hasRelatedData = true;
+            return;
+        }
+
+        db.Players.Remove(playerToDelete);
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/players");
+    }
+}

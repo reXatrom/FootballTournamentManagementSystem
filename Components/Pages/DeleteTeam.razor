@@ -1,0 +1,80 @@
+@page "/teams/delete/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Delete Team</PageTitle>
+
+@if (team is null)
+{
+    <p>Loading team...</p>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Team management</p>
+        <h1 class="page-title">Delete team</h1>
+        <p class="page-subtitle">Review this action before permanently removing the team.</p>
+        <section class="confirmation-panel">
+            <h2>@team.Name</h2>
+            <p>@team.Tournament.Name</p>
+            @if (hasRelatedData)
+            {
+                <p class="validation-message">This team cannot be deleted because it has players or matches. Remove those records first.</p>
+            }
+            else
+            {
+                <p>This team has no players or matches and can be safely deleted.</p>
+                <button class="btn btn-danger" @onclick="DeleteAsync">Delete team</button>
+            }
+            <a class="btn btn-secondary" href="/teams">Cancel</a>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Team? team;
+    private bool hasRelatedData;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        team = await db.Teams.AsNoTracking().Include(item => item.Tournament).SingleOrDefaultAsync(item => item.Id == Id);
+        if (team is not null)
+        {
+            hasRelatedData = await db.Players.AnyAsync(player => player.TeamId == Id)
+                || await db.Matches.AnyAsync(match => match.HomeTeamId == Id || match.AwayTeamId == Id);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var teamToDelete = await db.Teams.FindAsync(Id);
+        if (teamToDelete is null)
+        {
+            Navigation.NavigateTo("/teams");
+            return;
+        }
+
+        var hasPlayers = await db.Players.AnyAsync(player => player.TeamId == Id);
+        var hasMatches = await db.Matches.AnyAsync(match => match.HomeTeamId == Id || match.AwayTeamId == Id);
+        if (hasPlayers || hasMatches)
+        {
+            hasRelatedData = true;
+            return;
+        }
+
+        db.Teams.Remove(teamToDelete);
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/teams");
+    }
+}

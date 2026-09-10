@@ -1,0 +1,59 @@
+@page "/match-events/delete/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Delete Match Event</PageTitle>
+
+@if (matchEvent is null)
+{
+    <p>Loading event...</p>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Match detail</p>
+        <h1 class="page-title">Delete match event</h1>
+        <p class="page-subtitle">Review this action before removing the event.</p>
+        <section class="confirmation-panel">
+            <h2>@matchEvent.EventType - @matchEvent.GoalScorer.FirstName @matchEvent.GoalScorer.LastName</h2>
+            <p>@matchEvent.Match.HomeTeam.Name vs @matchEvent.Match.AwayTeam.Name</p>
+            <p>This event can be removed from the match record.</p>
+            <button class="btn btn-danger" @onclick="DeleteAsync">Delete event</button>
+            <a class="btn btn-secondary" href="/match-events">Cancel</a>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private MatchEvent? matchEvent;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        matchEvent = await db.MatchEvents.AsNoTracking()
+            .Include(item => item.Match).ThenInclude(match => match.HomeTeam)
+            .Include(item => item.Match).ThenInclude(match => match.AwayTeam)
+            .Include(item => item.GoalScorer)
+            .SingleOrDefaultAsync(item => item.Id == Id);
+    }
+
+    private async Task DeleteAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var eventToDelete = await db.MatchEvents.FindAsync(Id);
+        if (eventToDelete is not null)
+        {
+            db.MatchEvents.Remove(eventToDelete);
+            await db.SaveChangesAsync();
+        }
+
+        Navigation.NavigateTo("/match-events");
+    }
+}

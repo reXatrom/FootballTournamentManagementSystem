@@ -1,0 +1,83 @@
+@page "/match-events"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Match Events</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Live match detail</p>
+        <h1 class="page-title">Match events</h1>
+        <p class="page-subtitle">Review goals, cards, substitutions, and assists.</p>
+    </div>
+    <AuthorizeView Roles="Administrator,Tournament Manager">
+        <Authorized>
+            <a class="btn btn-primary" href="/match-events/create">Record event</a>
+        </Authorized>
+    </AuthorizeView>
+</div>
+
+@if (events is null)
+{
+    <p>Loading match events...</p>
+}
+else if (events.Count == 0)
+{
+    <section class="empty-state">
+        <h2>No match events yet</h2>
+        <p>Record an event after scheduling a match and registering players.</p>
+    </section>
+}
+else
+{
+    <div class="event-list">
+        @foreach (var matchGroup in events.GroupBy(item => item.Match))
+        {
+            <section class="event-group">
+                <div class="event-group-heading">
+                    <h2>@matchGroup.Key.HomeTeam.Name vs @matchGroup.Key.AwayTeam.Name</h2>
+                    <span>@matchGroup.Key.MatchDate.ToString("MMM d, yyyy")</span>
+                </div>
+                @foreach (var matchEvent in matchGroup.OrderBy(item => item.Minute ?? 121))
+                {
+                    <div class="event-row">
+                        <span class="event-minute">@(matchEvent.Minute is null ? "-" : $"{matchEvent.Minute}'")</span>
+                        <strong>@matchEvent.EventType</strong>
+                        <span>@matchEvent.GoalScorer.FirstName @matchEvent.GoalScorer.LastName</span>
+                        @if (matchEvent.AssistedByPlayer is not null)
+                        {
+                            <span>Assist: @matchEvent.AssistedByPlayer.FirstName @matchEvent.AssistedByPlayer.LastName</span>
+                        }
+                        <AuthorizeView Roles="Administrator,Tournament Manager">
+                            <Authorized>
+                                <a href="/match-events/delete/@matchEvent.Id">Delete</a>
+                            </Authorized>
+                        </AuthorizeView>
+                    </div>
+                }
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private List<MatchEvent>? events;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        events = await db.MatchEvents
+            .AsNoTracking()
+            .Include(item => item.Match).ThenInclude(match => match.HomeTeam)
+            .Include(item => item.Match).ThenInclude(match => match.AwayTeam)
+            .Include(item => item.GoalScorer)
+            .Include(item => item.AssistedByPlayer)
+            .OrderBy(item => item.Match.MatchDate)
+            .ThenBy(item => item.Minute)
+            .ToListAsync();
+    }
+}

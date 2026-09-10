@@ -1,0 +1,76 @@
+@page "/tournaments"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Tournaments</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Competition calendar</p>
+        <h1 class="page-title">Tournaments</h1>
+        <p class="page-subtitle">Browse upcoming and completed football competitions.</p>
+    </div>
+    <AuthorizeView Roles="Administrator,Tournament Manager">
+        <Authorized>
+            <a class="btn btn-primary" href="/tournaments/create">Create tournament</a>
+        </Authorized>
+    </AuthorizeView>
+</div>
+
+@if (tournaments is null)
+{
+    <p>Loading tournaments...</p>
+}
+else if (tournaments.Count == 0)
+{
+    <section class="empty-state">
+        <h2>No tournaments yet</h2>
+        <p>The tournament calendar is ready for its first competition.</p>
+    </section>
+}
+else
+{
+    <div class="tournament-grid">
+        @foreach (var tournament in tournaments)
+        {
+            <article class="tournament-card">
+                <div class="tournament-card-header">
+                    <span class="status-badge status-@tournament.Status.ToString().ToLowerInvariant()">@tournament.Status</span>
+                    <span>@tournament.Location</span>
+                </div>
+                <h2>@tournament.Name</h2>
+                <p>@tournament.Description</p>
+                <div class="tournament-dates">
+                    <strong>@tournament.StartDate.ToString("MMM d, yyyy")</strong>
+                    <span>to</span>
+                    <strong>@tournament.EndDate.ToString("MMM d, yyyy")</strong>
+                </div>
+                <AuthorizeView Roles="Administrator,Tournament Manager">
+                    <Authorized>
+                        <div class="card-actions">
+                            <a href="/tournaments/edit/@tournament.Id">Edit</a>
+                            <a href="/tournaments/delete/@tournament.Id">Delete</a>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private List<Tournament>? tournaments;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tournaments = await db.Tournaments
+            .AsNoTracking()
+            .OrderBy(tournament => tournament.StartDate)
+            .ToListAsync();
+    }
+}

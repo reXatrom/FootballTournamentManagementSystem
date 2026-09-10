@@ -1,0 +1,123 @@
+@page "/tournaments/create"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using System.ComponentModel.DataAnnotations
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Create Tournament</PageTitle>
+
+<div class="form-page">
+    <p class="eyebrow">Tournament management</p>
+    <h1 class="page-title">Create tournament</h1>
+    <p class="page-subtitle">Set up the competition details before adding teams.</p>
+
+    <EditForm Model="model" OnValidSubmit="SaveTournament" class="tournament-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-grid">
+            <div class="form-field form-field-wide">
+                <label for="name">Tournament name</label>
+                <InputText id="name" @bind-Value="model.Name" />
+                <ValidationMessage For="@(() => model.Name)" />
+            </div>
+
+            <div class="form-field">
+                <label for="location">Location</label>
+                <InputText id="location" @bind-Value="model.Location" />
+                <ValidationMessage For="@(() => model.Location)" />
+            </div>
+
+            <div class="form-field">
+                <label for="status">Status</label>
+                <InputSelect id="status" @bind-Value="model.Status">
+                    @foreach (var status in Enum.GetValues<TournamentStatus>())
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="form-field">
+                <label for="start-date">Start date</label>
+                <InputDate id="start-date" @bind-Value="model.StartDate" />
+                <ValidationMessage For="@(() => model.StartDate)" />
+            </div>
+
+            <div class="form-field">
+                <label for="end-date">End date</label>
+                <InputDate id="end-date" @bind-Value="model.EndDate" />
+                <ValidationMessage For="@(() => model.EndDate)" />
+            </div>
+
+            <div class="form-field form-field-wide">
+                <label for="description">Description</label>
+                <InputTextArea id="description" @bind-Value="model.Description" rows="5" />
+                <ValidationMessage For="@(() => model.Description)" />
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <a class="btn btn-secondary" href="/tournaments">Cancel</a>
+            <button class="btn btn-primary" type="submit">Create tournament</button>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    private readonly TournamentInput model = new()
+    {
+        StartDate = DateTime.Today,
+        EndDate = DateTime.Today.AddDays(1),
+        Status = TournamentStatus.Upcoming
+    };
+
+    private async Task SaveTournament()
+    {
+        if (model.EndDate < model.StartDate)
+        {
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Tournaments.Add(new Tournament
+        {
+            Name = model.Name,
+            Description = model.Description,
+            Location = model.Location,
+            StartDate = model.StartDate,
+            EndDate = model.EndDate,
+            Status = model.Status
+        });
+
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/tournaments");
+    }
+
+    private sealed class TournamentInput
+    {
+        [Required, StringLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [Required, StringLength(1000)]
+        public string Description { get; set; } = string.Empty;
+
+        [Required, StringLength(200)]
+        public string Location { get; set; } = string.Empty;
+
+        [Required]
+        public DateTime StartDate { get; set; }
+
+        [Required]
+        public DateTime EndDate { get; set; }
+
+        [Required]
+        public TournamentStatus Status { get; set; }
+    }
+}

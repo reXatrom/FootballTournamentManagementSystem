@@ -1,0 +1,81 @@
+@page "/tournaments/delete/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Delete Tournament</PageTitle>
+
+@if (tournament is null)
+{
+    <p>Loading tournament...</p>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Tournament management</p>
+        <h1 class="page-title">Delete tournament</h1>
+        <p class="page-subtitle">Review this action before permanently removing the tournament.</p>
+
+        <section class="confirmation-panel">
+            <h2>@tournament.Name</h2>
+            <p>@tournament.Location</p>
+            @if (hasRelatedData)
+            {
+                <p class="validation-message">This tournament cannot be deleted because it has teams or matches. Remove those records first.</p>
+            }
+            else
+            {
+                <p>This tournament has no teams or matches and can be safely deleted.</p>
+                <button class="btn btn-danger" @onclick="DeleteAsync">Delete tournament</button>
+            }
+            <a class="btn btn-secondary" href="/tournaments">Cancel</a>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Tournament? tournament;
+    private bool hasRelatedData;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tournament = await db.Tournaments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+        if (tournament is not null)
+        {
+            hasRelatedData = await db.Teams.AnyAsync(team => team.TournamentId == Id)
+                || await db.Matches.AnyAsync(match => match.TournamentId == Id);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var record = await db.Tournaments.FindAsync(Id);
+        if (record is null)
+        {
+            Navigation.NavigateTo("/tournaments");
+            return;
+        }
+
+        var hasTeams = await db.Teams.AnyAsync(team => team.TournamentId == Id);
+        var hasMatches = await db.Matches.AnyAsync(match => match.TournamentId == Id);
+        if (hasTeams || hasMatches)
+        {
+            hasRelatedData = true;
+            return;
+        }
+
+        db.Tournaments.Remove(record);
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/tournaments");
+    }
+}

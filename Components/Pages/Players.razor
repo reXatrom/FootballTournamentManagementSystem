@@ -1,0 +1,87 @@
+@page "/players"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Players</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Team rosters</p>
+        <h1 class="page-title">Players</h1>
+        <p class="page-subtitle">Browse registered players and their positions.</p>
+    </div>
+    <AuthorizeView Roles="Administrator,Tournament Manager">
+        <Authorized>
+            <a class="btn btn-primary" href="/players/create">Add player</a>
+        </Authorized>
+    </AuthorizeView>
+</div>
+
+@if (players is null)
+{
+    <p>Loading players...</p>
+}
+else if (players.Count == 0)
+{
+    <section class="empty-state">
+        <h2>No players yet</h2>
+        <p>Add players to a team to build the tournament rosters.</p>
+    </section>
+}
+else
+{
+    <div class="player-table-wrapper">
+        <table class="player-table">
+            <thead>
+                <tr>
+                    <th>Player</th>
+                    <th>Team</th>
+                    <th>Tournament</th>
+                    <th>Position</th>
+                    <th>Number</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var player in players)
+                {
+                    <tr>
+                        <td><strong>@player.FirstName @player.LastName</strong></td>
+                        <td>@player.Team.Name</td>
+                        <td>@player.Team.Tournament.Name</td>
+                        <td>@player.Position</td>
+                        <td><span class="jersey-number">@player.JerseyNumber</span></td>
+                        <td>
+                            <AuthorizeView Roles="Administrator,Tournament Manager">
+                                <Authorized>
+                                    <a href="/players/edit/@player.Id">Edit</a>
+                                    <a href="/players/delete/@player.Id">Delete</a>
+                                </Authorized>
+                            </AuthorizeView>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<Player>? players;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        players = await db.Players
+            .AsNoTracking()
+            .Include(player => player.Team)
+            .ThenInclude(team => team.Tournament)
+            .OrderBy(player => player.Team.Name)
+            .ThenBy(player => player.JerseyNumber)
+            .ToListAsync();
+    }
+}

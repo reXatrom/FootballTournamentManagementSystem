@@ -1,0 +1,122 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Dashboard</PageTitle>
+
+@if (summary is null)
+{
+	<p>Loading dashboard...</p>
+}
+else
+{
+	<section class="dashboard-hero">
+		<div>
+			<p class="eyebrow">Football tournament management system</p>
+			<h1>Keep every fixture moving.</h1>
+			<p>One clear view of competitions, rosters, fixtures, and the moments that decide them.</p>
+		</div>
+		<div class="hero-ball" aria-hidden="true">&#9917;</div>
+	</section>
+
+	<section class="stat-grid" aria-label="System summary">
+		<article class="stat-card stat-card-accent">
+			<span class="stat-label">Tournaments</span>
+			<strong>@summary.Tournaments</strong>
+			<a href="/tournaments">Open calendar</a>
+		</article>
+		<article class="stat-card">
+			<span class="stat-label">Teams</span>
+			<strong>@summary.Teams</strong>
+			<a href="/teams">View teams</a>
+		</article>
+		<article class="stat-card">
+			<span class="stat-label">Players</span>
+			<strong>@summary.Players</strong>
+			<a href="/players">View players</a>
+		</article>
+		<article class="stat-card">
+			<span class="stat-label">Matches</span>
+			<strong>@summary.Matches</strong>
+			<a href="/matches">View fixtures</a>
+		</article>
+	</section>
+
+	<section class="dashboard-columns">
+		<div class="dashboard-panel">
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">Next on the pitch</p>
+					<h2>Upcoming fixtures</h2>
+				</div>
+				<a href="/matches">All matches</a>
+			</div>
+			@if (summary.UpcomingMatches.Count == 0)
+			{
+				<p class="panel-muted">No upcoming fixtures have been scheduled.</p>
+			}
+			else
+			{
+				@foreach (var match in summary.UpcomingMatches)
+				{
+					<div class="fixture-row">
+						<div class="fixture-date">@match.MatchDate.ToString("MMM\ndd")</div>
+						<div>
+							<strong>@match.HomeTeam.Name <span>vs</span> @match.AwayTeam.Name</strong>
+							<small>@match.Tournament.Name · @match.Location</small>
+						</div>
+						<span class="status-badge status-scheduled">Scheduled</span>
+					</div>
+				}
+			}
+		</div>
+
+		<div class="dashboard-panel dashboard-panel-dark">
+			<p class="eyebrow">Quick actions</p>
+			<h2>Build the competition</h2>
+			<p>Create the structure first, then let the match calendar tell the story.</p>
+			<div class="quick-actions">
+				<a href="/tournaments/create">New tournament</a>
+				<a href="/teams/create">Add a team</a>
+				<a href="/matches/create">Schedule a match</a>
+			</div>
+		</div>
+	</section>
+}
+
+@code {
+	private DashboardSummary? summary;
+
+	protected override async Task OnInitializedAsync()
+	{
+		await using var db = await DbFactory.CreateDbContextAsync();
+		summary = new DashboardSummary
+		{
+			Tournaments = await db.Tournaments.CountAsync(),
+			Teams = await db.Teams.CountAsync(),
+			Players = await db.Players.CountAsync(),
+			Matches = await db.Matches.CountAsync(),
+			UpcomingMatches = await db.Matches
+				.AsNoTracking()
+				.Include(match => match.Tournament)
+				.Include(match => match.HomeTeam)
+				.Include(match => match.AwayTeam)
+				.Where(match => match.Status == MatchStatus.Scheduled)
+				.OrderBy(match => match.MatchDate)
+				.Take(4)
+				.ToListAsync()
+		};
+	}
+
+	private sealed class DashboardSummary
+	{
+		public int Tournaments { get; init; }
+		public int Teams { get; init; }
+		public int Players { get; init; }
+		public int Matches { get; init; }
+		public List<Match> UpcomingMatches { get; init; } = new();
+	}
+}

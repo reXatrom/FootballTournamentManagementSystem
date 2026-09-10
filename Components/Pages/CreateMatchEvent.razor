@@ -1,0 +1,174 @@
+@page "/match-events/create"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using System.ComponentModel.DataAnnotations
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Record Match Event</PageTitle>
+
+@if (matches is null || players is null)
+{
+    <p>Loading event options...</p>
+}
+else if (matches.Count == 0 || players.Count == 0)
+{
+    <section class="empty-state">
+        <h2>Create a match and players first</h2>
+        <p>An event needs a scheduled match and at least one registered player.</p>
+        <a class="btn btn-primary" href="/matches">View matches</a>
+    </section>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Match detail</p>
+        <h1 class="page-title">Record match event</h1>
+        <p class="page-subtitle">Add a goal, card, substitution, or other match event.</p>
+        <EditForm Model="model" OnValidSubmit="SaveEvent" class="tournament-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div class="form-field form-field-wide">
+                    <label for="match">Match</label>
+                    <InputSelect id="match" @bind-Value="model.MatchId">
+                        @foreach (var match in matches)
+                        {
+                            <option value="@match.Id">@match.HomeTeam - @match.AwayTeam (@match.MatchDate.ToString("MMM d"))</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="event-type">Event type</label>
+                    <InputSelect id="event-type" @bind-Value="model.EventType">
+                        @foreach (var eventType in Enum.GetValues<MatchEventType>())
+                        {
+                            <option value="@eventType">@eventType</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="scorer">Player</label>
+                    <InputSelect id="scorer" @bind-Value="model.GoalScorerId">
+                        @foreach (var player in players)
+                        {
+                            <option value="@player.Id">@player.Name - @player.Team</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="assist">Assist (optional)</label>
+                    <InputSelect id="assist" @bind-Value="model.AssistedByPlayerId">
+                        <option value="">None</option>
+                        @foreach (var player in players)
+                        {
+                            <option value="@player.Id">@player.Name - @player.Team</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="minute">Minute</label>
+                    <InputNumber id="minute" @bind-Value="model.Minute" />
+                    <ValidationMessage For="@(() => model.Minute)" />
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="validation-message">@errorMessage</p>
+            }
+            <div class="form-actions">
+                <a class="btn btn-secondary" href="/match-events">Cancel</a>
+                <button class="btn btn-primary" type="submit">Record event</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private List<MatchOption>? matches;
+    private List<PlayerOption>? players;
+    private string? errorMessage;
+    private readonly EventInput model = new() { EventType = MatchEventType.Goal };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        matches = await db.Matches.AsNoTracking().Include(item => item.HomeTeam).Include(item => item.AwayTeam)
+            .OrderByDescending(item => item.MatchDate)
+            .Select(item => new MatchOption { Id = item.Id, HomeTeam = item.HomeTeam.Name, AwayTeam = item.AwayTeam.Name, MatchDate = item.MatchDate })
+            .ToListAsync();
+        players = await db.Players.AsNoTracking().Include(item => item.Team).OrderBy(item => item.Team.Name).ThenBy(item => item.LastName)
+            .Select(item => new PlayerOption { Id = item.Id, Name = item.FirstName + " " + item.LastName, Team = item.Team.Name, TeamId = item.TeamId })
+            .ToListAsync();
+
+        if (matches.Count > 0)
+        {
+            model.MatchId = matches[0].Id;
+        }
+        if (players.Count > 0)
+        {
+            model.GoalScorerId = players[0].Id;
+        }
+    }
+
+    private async Task SaveEvent()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var match = await db.Matches.AsNoTracking().SingleOrDefaultAsync(item => item.Id == model.MatchId);
+        var scorer = players?.SingleOrDefault(item => item.Id == model.GoalScorerId);
+        var assister = model.AssistedByPlayerId is null ? null : players?.SingleOrDefault(item => item.Id == model.AssistedByPlayerId);
+        if (match is null || scorer is null || (assister is not null && assister.Id == scorer.Id))
+        {
+            errorMessage = "Select a valid match, player, and optional different assister.";
+            return;
+        }
+
+        if (scorer.TeamId != match.HomeTeamId && scorer.TeamId != match.AwayTeamId
+            || assister is not null && assister.TeamId != match.HomeTeamId && assister.TeamId != match.AwayTeamId)
+        {
+            errorMessage = "Players must belong to one of the teams in the selected match.";
+            return;
+        }
+
+        db.MatchEvents.Add(new MatchEvent
+        {
+            MatchId = model.MatchId,
+            GoalScorerId = model.GoalScorerId,
+            AssistedByPlayerId = model.AssistedByPlayerId,
+            EventType = model.EventType,
+            Minute = model.Minute
+        });
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/match-events");
+    }
+
+    private sealed class EventInput
+    {
+        [Required] public int MatchId { get; set; }
+        [Required] public int GoalScorerId { get; set; }
+        public int? AssistedByPlayerId { get; set; }
+        [Required] public MatchEventType EventType { get; set; }
+        [Range(1, 120)] public int? Minute { get; set; }
+    }
+
+    private sealed class MatchOption
+    {
+        public int Id { get; set; }
+        public string HomeTeam { get; set; } = string.Empty;
+        public string AwayTeam { get; set; } = string.Empty;
+        public DateTime MatchDate { get; set; }
+    }
+
+    private sealed class PlayerOption
+    {
+        public int Id { get; set; }
+        public int TeamId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Team { get; set; } = string.Empty;
+    }
+}

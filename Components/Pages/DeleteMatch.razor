@@ -1,0 +1,77 @@
+@page "/matches/delete/{Id:int}"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Delete Match</PageTitle>
+
+@if (match is null)
+{
+    <p>Loading match...</p>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Fixture management</p>
+        <h1 class="page-title">Delete match</h1>
+        <p class="page-subtitle">Review this action before permanently removing the fixture.</p>
+        <section class="confirmation-panel">
+            <h2>@match.HomeTeam.Name vs @match.AwayTeam.Name</h2>
+            <p>@match.Tournament.Name · @match.MatchDate.ToString("MMM d, yyyy")</p>
+            @if (hasEvents)
+            {
+                <p class="validation-message">This match cannot be deleted because it has match events. Remove those events first.</p>
+            }
+            else
+            {
+                <p>This match has no recorded events and can be safely deleted.</p>
+                <button class="btn btn-danger" @onclick="DeleteAsync">Delete match</button>
+            }
+            <a class="btn btn-secondary" href="/matches">Cancel</a>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private Match? match;
+    private bool hasEvents;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        match = await db.Matches.AsNoTracking()
+            .Include(item => item.Tournament).Include(item => item.HomeTeam).Include(item => item.AwayTeam)
+            .SingleOrDefaultAsync(item => item.Id == Id);
+        if (match is not null)
+        {
+            hasEvents = await db.MatchEvents.AnyAsync(item => item.MatchId == Id);
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var matchToDelete = await db.Matches.FindAsync(Id);
+        if (matchToDelete is null)
+        {
+            Navigation.NavigateTo("/matches");
+            return;
+        }
+
+        if (await db.MatchEvents.AnyAsync(item => item.MatchId == Id))
+        {
+            hasEvents = true;
+            return;
+        }
+
+        db.Matches.Remove(matchToDelete);
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo("/matches");
+    }
+}
