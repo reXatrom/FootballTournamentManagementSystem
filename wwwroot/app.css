@@ -12,7 +12,7 @@
 }
 
 html, body {
-    font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--ftms-light);
     color: var(--ftms-ink);
 }
@@ -219,6 +219,150 @@ h1:focus {
 .event-minute { color: var(--ftms-primary); font-weight: 800; min-width: 28px; }
 .event-row strong { color: var(--ftms-dark); }
 
+.account-page {
+    background: var(--ftms-light);
+    color: #1a1a1a;
+    min-height: 100vh;
+}
+
+.account-shell {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+}
+
+.account-card {
+    background: #fff;
+    border: 1px solid var(--ftms-border);
+    border-radius: 8px;
+    box-shadow: 0 12px 30px rgba(20, 33, 61, .08);
+    max-width: 420px;
+    padding: 32px;
+    width: 100%;
+}
+
+.account-card-login {
+    max-width: 400px;
+}
+
+.account-card h1 {
+    color: #1a1a1a;
+    font-size: clamp(1.9rem, 6vw, 2.35rem);
+    font-weight: 800;
+    line-height: 1.1;
+    margin: .25rem 0 .75rem;
+}
+
+.account-subtitle {
+    color: var(--ftms-muted);
+    font-size: 1rem;
+    line-height: 1.5;
+    margin: 0 0 1.75rem;
+}
+
+.account-form {
+    display: grid;
+    gap: 1rem;
+}
+
+.account-field {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+}
+
+.account-field label {
+    color: var(--ftms-ink);
+    font-size: .86rem;
+    font-weight: 600;
+}
+
+.account-field input {
+    background: #fff;
+    border: 1px solid var(--ftms-border);
+    border-radius: 8px;
+    color: var(--ftms-ink);
+    font: inherit;
+    padding: .72rem .8rem;
+    transition: border-color .15s ease, box-shadow .15s ease;
+    width: 100%;
+}
+
+.account-field input:focus {
+    border-color: var(--ftms-primary);
+    box-shadow: 0 0 0 .18rem rgba(228, 87, 46, .16);
+    outline: none;
+}
+
+.checkbox-label {
+    align-items: center;
+    color: var(--ftms-ink);
+    cursor: pointer;
+    display: inline-flex;
+    gap: .5rem;
+    font-size: .92rem;
+    font-weight: 600;
+    margin: .1rem 0 .15rem;
+}
+
+.checkbox-label input {
+    accent-color: var(--ftms-primary);
+    height: 1rem;
+    margin: 0;
+    width: 1rem;
+}
+
+.checkbox-label input:focus {
+    outline: 2px solid rgba(228, 87, 46, .35);
+    outline-offset: 2px;
+}
+
+.account-form button {
+    background: var(--ftms-primary);
+    border: 0;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 800;
+    margin-top: .25rem;
+    padding: .78rem 1rem;
+    transition: background-color .15s ease, transform .15s ease;
+    width: 100%;
+}
+
+.account-form button:hover {
+    background: var(--ftms-primary-dark);
+}
+
+.account-form button:active {
+    transform: translateY(1px);
+}
+
+.account-switch {
+    color: var(--ftms-muted);
+    margin: 1.35rem 0 0;
+    text-align: center;
+}
+
+.account-switch a {
+    color: var(--ftms-primary);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.account-switch a:hover {
+    text-decoration: underline;
+}
+
+.account-form .validation-summary,
+.account-form .validation-message {
+    color: var(--ftms-danger);
+    font-size: .82rem;
+}
+
 @media (max-width: 800px) {
     .stat-grid, .dashboard-columns { grid-template-columns: 1fr 1fr; }
     .dashboard-columns { grid-template-columns: 1fr; }
@@ -235,6 +379,8 @@ h1:focus {
     .fixture-row { grid-template-columns: 45px 1fr; }
     .fixture-row .status-badge { grid-column: 2; justify-self: start; }
     .event-row { align-items: start; flex-wrap: wrap; }
+    .account-shell { align-items: flex-start; padding-top: 1rem; }
+    .account-card { padding: 1.5rem; }
 }
 
 .blazor-error-boundary {
