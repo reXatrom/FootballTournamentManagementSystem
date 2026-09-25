@@ -34,25 +34,41 @@ else if (teams.Count == 0)
 }
 else
 {
-    <div class="team-grid">
-        @foreach (var team in teams)
+    <div class="league-list">
+        @foreach (var leagueGroup in teams.GroupBy(team => team.TournamentId))
         {
-            <article class="team-card">
-                <div class="team-mark" aria-hidden="true">@team.Name[..1].ToUpperInvariant()</div>
-                <div>
-                    <p class="eyebrow">@team.Tournament.Name</p>
-                    <h2>@team.Name</h2>
-                    <p>@team.Players.Count player(s)</p>
-                    <AuthorizeView Roles="Administrator,Tournament Manager">
-                        <Authorized>
-                            <div class="card-actions">
-                                <a href="/teams/edit/@team.Id">Edit</a>
-                                <a href="/teams/delete/@team.Id">Delete</a>
-                            </div>
-                        </Authorized>
-                    </AuthorizeView>
+            var league = leagueGroup.First().Tournament;
+            <section class="league-section">
+                <div class="league-heading">
+                    <div>
+                        <p class="eyebrow">League</p>
+                        <h2>@league.Name</h2>
+                        <p>@league.Location · @leagueGroup.Count() teams</p>
+                    </div>
+                    <span class="league-status">@league.Status</span>
                 </div>
-            </article>
+
+                <div class="team-grid">
+                    @foreach (var team in leagueGroup.OrderBy(item => item.Name))
+                    {
+                        <article class="team-card">
+                            <div class="team-mark" aria-hidden="true">@team.Name[..1].ToUpperInvariant()</div>
+                            <div>
+                                <h3>@team.Name</h3>
+                                <p>@team.Players.Count player(s)</p>
+                                <AuthorizeView Roles="Administrator,Tournament Manager">
+                                    <Authorized>
+                                        <div class="card-actions">
+                                            <a href="/teams/edit/@team.Id">Edit</a>
+                                            <a href="/teams/delete/@team.Id">Delete</a>
+                                        </div>
+                                    </Authorized>
+                                </AuthorizeView>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </section>
         }
     </div>
 }
