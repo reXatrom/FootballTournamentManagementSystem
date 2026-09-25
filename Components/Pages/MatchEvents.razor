@@ -35,12 +35,13 @@ else if (events.Count == 0)
 else
 {
     <div class="event-list">
-        @foreach (var matchGroup in events.GroupBy(item => item.Match))
+        @foreach (var matchGroup in events.GroupBy(item => item.MatchId))
         {
+            var match = matchGroup.First().Match;
             <section class="event-group">
                 <div class="event-group-heading">
-                    <h2>@matchGroup.Key.HomeTeam.Name vs @matchGroup.Key.AwayTeam.Name</h2>
-                    <span>@matchGroup.Key.MatchDate.ToString("MMM d, yyyy")</span>
+                    <h2>@match.HomeTeam.Name vs @match.AwayTeam.Name</h2>
+                    <span>@match.MatchDate.ToString("MMM d, yyyy")</span>
                 </div>
                 @foreach (var matchEvent in matchGroup.OrderBy(item => item.Minute ?? 121))
                 {

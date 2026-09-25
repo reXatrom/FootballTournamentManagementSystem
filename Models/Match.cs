@@ -5,7 +5,7 @@ namespace FootballTournamentManagementSystem.Models;
 public enum MatchStatus
 {
     Scheduled = 0,
-    Completed = 1,
+    Ended = 1,
     Cancelled = 2
 }
 

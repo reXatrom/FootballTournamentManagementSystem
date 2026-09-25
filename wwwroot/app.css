@@ -179,7 +179,7 @@ h1:focus {
 .status-badge { border-radius: 20px; display: inline-block; font-size: .7rem; font-weight: 800; padding: .3rem .6rem; text-transform: uppercase; }
 .status-upcoming, .status-scheduled { background: #fff1cf; color: #8a5a00; }
 .status-ongoing { background: #d8f3ee; color: #176c63; }
-.status-completed { background: #e3e7ee; color: #465269; }
+.status-ended { background: #e3e7ee; color: #465269; }
 .status-cancelled { background: #f9d9dd; color: #8e2632; }
 .card-actions { border-top: 1px solid var(--ftms-border); display: flex; gap: 1rem; margin-top: 1rem; padding-top: .8rem; }
 .card-actions a { font-size: .85rem; font-weight: 700; }

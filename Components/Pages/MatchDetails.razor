@@ -1,0 +1,105 @@
+@page "/matches/{Id:int}"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Match Details</PageTitle>
+
+@if (match is null)
+{
+    <p>Loading match details...</p>
+}
+else
+{
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">Fixture</p>
+            <h1 class="page-title">@match.HomeTeam.Name vs @match.AwayTeam.Name</h1>
+            <p class="page-subtitle">@match.Tournament.Name · @match.MatchDate.ToString("MMM d, yyyy") · @match.Location</p>
+        </div>
+        <a class="btn btn-secondary" href="/matches">Back to matches</a>
+    </div>
+
+    <section class="standings-panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Score</p>
+                <h2>@match.HomeScore - @match.AwayScore</h2>
+            </div>
+            <span class="status-badge status-@match.Status.ToString().ToLowerInvariant()">@match.Status</span>
+        </div>
+
+        <div class="match-scoreline">
+            <strong>@match.HomeTeam.Name</strong>
+            <span>@match.HomeScore - @match.AwayScore</span>
+            <strong>@match.AwayTeam.Name</strong>
+        </div>
+    </section>
+
+    <section class="standings-panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Match events</p>
+                <h2>Event log</h2>
+            </div>
+            <a class="btn btn-primary" href="/match-events/create/@Id">Record event</a>
+        </div>
+
+        @if (events.Count == 0)
+        {
+            <p class="panel-muted">No events have been recorded for this fixture yet.</p>
+        }
+        else
+        {
+            <div class="event-list">
+                @foreach (var matchEvent in events.OrderBy(item => item.Minute ?? 121))
+                {
+                    <div class="event-row">
+                        <span class="event-minute">@(matchEvent.Minute is null ? "-" : $"{matchEvent.Minute}'")</span>
+                        <strong>@matchEvent.EventType</strong>
+                        <span>@matchEvent.GoalScorer.FirstName @matchEvent.GoalScorer.LastName</span>
+                        @if (matchEvent.AssistedByPlayer is not null)
+                        {
+                            <span>Assist: @matchEvent.AssistedByPlayer.FirstName @matchEvent.AssistedByPlayer.LastName</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Match? match;
+    private List<MatchEvent> events = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        match = await db.Matches
+            .AsNoTracking()
+            .Include(item => item.Tournament)
+            .Include(item => item.HomeTeam)
+            .Include(item => item.AwayTeam)
+            .SingleOrDefaultAsync(item => item.Id == Id);
+
+        if (match is null)
+        {
+            return;
+        }
+
+        events = await db.MatchEvents
+            .AsNoTracking()
+            .Include(item => item.GoalScorer)
+            .Include(item => item.AssistedByPlayer)
+            .Where(item => item.MatchId == Id)
+            .OrderBy(item => item.Minute ?? 121)
+            .ToListAsync();
+    }
+}

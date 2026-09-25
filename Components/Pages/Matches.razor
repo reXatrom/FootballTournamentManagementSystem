@@ -48,14 +48,15 @@ else
                     <span>@match.HomeScore - @match.AwayScore</span>
                     <strong>@match.AwayTeam.Name</strong>
                 </div>
-                <AuthorizeView Roles="Administrator,Tournament Manager">
-                    <Authorized>
-                        <div class="card-actions">
+                <div class="card-actions">
+                    <a href="/matches/@match.Id">Details</a>
+                    <AuthorizeView Roles="Administrator,Tournament Manager">
+                        <Authorized>
                             <a href="/matches/edit/@match.Id">Edit</a>
                             <a href="/matches/delete/@match.Id">Delete</a>
-                        </div>
-                    </Authorized>
-                </AuthorizeView>
+                        </Authorized>
+                    </AuthorizeView>
+                </div>
             </article>
         }
     </div>
