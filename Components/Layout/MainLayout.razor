@@ -10,7 +10,7 @@
         <div class="top-row px-4">
             <AuthorizeView>
                 <Authorized>
-                    <span>Hello, @context.User.Identity?.Name</span>
+                    <span>Hello, @(context.User.FindFirst("FullName")?.Value ?? context.User.Identity?.Name)</span>
                     <a href="account/logout">Log out</a>
                 </Authorized>
                 <NotAuthorized>
@@ -25,6 +25,8 @@
         </article>
     </main>
 </div>
+
+<MusicPlayer />
 
 <div id="blazor-error-ui">
     An unhandled error has occurred.

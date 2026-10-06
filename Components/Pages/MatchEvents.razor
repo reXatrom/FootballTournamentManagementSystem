@@ -4,9 +4,15 @@
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Match Events</PageTitle>
+
+@if (Saved == "1")
+{
+    <p class="panel-muted">Changes saved.</p>
+}
 
 <div class="page-heading">
     <div>
@@ -14,14 +20,14 @@
         <h1 class="page-title">Match events</h1>
         <p class="page-subtitle">Review goals, cards, substitutions, and assists.</p>
     </div>
-    <AuthorizeView Roles="Administrator,Tournament Manager">
-        <Authorized>
-            <a class="btn btn-primary" href="/match-events/create">Record event</a>
-        </Authorized>
-    </AuthorizeView>
+    <a class="btn btn-primary" href="/match-events/create">Record event</a>
 </div>
 
-@if (events is null)
+@if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load match events</h2><p>@errorMessage</p></section>
+}
+else if (events is null)
 {
     <p>Loading match events...</p>
 }
@@ -46,18 +52,22 @@ else
                         <p>@tournament.Location</p>
                     </div>
                 </div>
+
                 <div class="event-list">
                     @foreach (var matchGroup in tournamentGroup.GroupBy(item => item.MatchId))
                     {
                         var match = matchGroup.First().Match;
                         <section class="event-group">
                             <div class="event-group-heading">
-                                <h2>@match.HomeTeam.Name 🆚 @match.AwayTeam.Name</h2>
+                                <h2>@match.HomeTeam.Name vs @match.AwayTeam.Name</h2>
                                 <span>@match.MatchDate.ToString("MMM d, yyyy")</span>
                             </div>
+
                             @foreach (var matchEvent in matchGroup.OrderBy(item => item.Minute ?? 121))
                             {
                                 <div class="event-row">
+                                    <a href="/match-events/@matchEvent.Id">Details</a>
+                                    <span>Created by @matchEvent.CreatedByUser.FullName · @matchEvent.CreatedAt.ToLocalTime().ToString("g")</span>
                                     <span class="event-minute">@(matchEvent.Minute is null ? "-" : $"{matchEvent.Minute}'")</span>
                                     <strong>@matchEvent.EventType</strong>
                                     <span>@matchEvent.GoalScorer.FirstName @matchEvent.GoalScorer.LastName</span>
@@ -65,11 +75,11 @@ else
                                     {
                                         <span>Assist: @matchEvent.AssistedByPlayer.FirstName @matchEvent.AssistedByPlayer.LastName</span>
                                     }
-                                    <AuthorizeView Roles="Administrator,Tournament Manager">
-                                        <Authorized>
-                                            <a href="/match-events/delete/@matchEvent.Id">Delete</a>
-                                        </Authorized>
-                                    </AuthorizeView>
+                                    @if (CanManage(matchEvent))
+                                    {
+                                        <a href="/match-events/edit/@matchEvent.Id">Edit</a>
+                                        <a href="/match-events/delete/@matchEvent.Id">Delete</a>
+                                    }
                                 </div>
                             }
                         </section>
@@ -81,21 +91,41 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "saved")]
+    public string? Saved { get; set; }
+
     private List<MatchEvent>? events;
+    private string? errorMessage;
+    private string? currentUserId;
+    private bool isAdmin;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        events = await db.MatchEvents
-            .AsNoTracking()
-            .Include(item => item.Match).ThenInclude(match => match.HomeTeam)
-            .Include(item => item.Match).ThenInclude(match => match.AwayTeam)
-            .Include(item => item.Match).ThenInclude(match => match.Tournament)
-            .Include(item => item.GoalScorer)
-            .Include(item => item.AssistedByPlayer)
-            .OrderBy(item => item.Match.Tournament.StartDate)
-            .ThenBy(item => item.Match.MatchDate)
-            .ThenBy(item => item.Minute)
-            .ToListAsync();
+        try
+        {
+            var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+            currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            isAdmin = user.IsInRole("Admin");
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            events = await db.MatchEvents
+                .AsNoTracking()
+                .Include(item => item.CreatedByUser)
+                .Include(item => item.Match).ThenInclude(match => match.HomeTeam)
+                .Include(item => item.Match).ThenInclude(match => match.AwayTeam)
+                .Include(item => item.Match).ThenInclude(match => match.Tournament)
+                .Include(item => item.GoalScorer)
+                .Include(item => item.AssistedByPlayer)
+                .OrderBy(item => item.Match.Tournament.StartDate)
+                .ThenBy(item => item.Match.MatchDate)
+                .ThenBy(item => item.Minute ?? 121)
+                .ToListAsync();
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
     }
+
+    private bool CanManage(IOwnedRecord record) => isAdmin || record.CreatedByUserId == currentUserId;
 }

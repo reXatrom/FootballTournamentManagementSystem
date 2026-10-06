@@ -1,20 +1,34 @@
 @page "/matches/edit/{Id:int}"
+@page "/matches/{Id:int}/edit"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using System.ComponentModel.DataAnnotations
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
+@using FootballTournamentManagementSystem.Services
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
 
 <PageTitle>Edit Match</PageTitle>
 
-@if (model is null)
+@if (isLoading)
 {
     <p>Loading match...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load match</h2><p>@loadError</p><a href="/matches">Back to matches</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (model is null)
+{
+    <section class="empty-state"><h2>Match not found</h2><a href="/matches">Back to matches</a></section>
 }
 else
 {
@@ -71,15 +85,9 @@ else
                         }
                     </InputSelect>
                 </div>
-                <div class="form-field">
-                    <label for="home-score">Home score</label>
-                    <InputNumber id="home-score" @bind-Value="model.HomeScore" />
-                    <ValidationMessage For="@(() => model.HomeScore)" />
-                </div>
-                <div class="form-field">
-                    <label for="away-score">Away score</label>
-                    <InputNumber id="away-score" @bind-Value="model.AwayScore" />
-                    <ValidationMessage For="@(() => model.AwayScore)" />
+                <div class="form-field form-field-wide">
+                    <label>Score</label>
+                    <p class="form-static-value">@model.HomeScore - @model.AwayScore · Calculated from goal events</p>
                 </div>
             </div>
             @if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -100,22 +108,49 @@ else
     private List<Tournament> tournaments = new();
     private List<TeamOption> teams = new();
     private string? errorMessage;
+    private string? loadError;
+    private bool isLoading = true;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
-        teams = await db.Teams.AsNoTracking().Include(item => item.Tournament).OrderBy(item => item.Name)
-            .Select(item => new TeamOption { Id = item.Id, Name = item.Name, Tournament = item.Tournament.Name }).ToListAsync();
-        var match = await db.Matches.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
-        if (match is not null)
+        try
         {
-            model = new MatchInput
+            var access = await RecordAccessService.CheckAsync<Match>(Id);
+            if (access == RecordAccessDecision.Forbidden)
             {
-                TournamentId = match.TournamentId, HomeTeamId = match.HomeTeamId, AwayTeamId = match.AwayTeamId,
-                MatchDate = match.MatchDate, Location = match.Location, Status = match.Status,
-                HomeScore = match.HomeScore, AwayScore = match.AwayScore
-            };
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+            teams = await db.Teams.AsNoTracking().OrderBy(item => item.Name)
+                .Select(item => new TeamOption { Id = item.Id, Name = item.Name, Tournament = item.Tournament.Name }).ToListAsync();
+            var match = await db.Matches.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+            if (match is not null)
+            {
+                var scores = await MatchScoreCalculator.CalculateAsync(db, new[] { match.Id });
+                model = new MatchInput
+                {
+                    TournamentId = match.TournamentId, HomeTeamId = match.HomeTeamId, AwayTeamId = match.AwayTeamId,
+                    MatchDate = match.MatchDate, Location = match.Location, Status = match.Status,
+                    HomeScore = scores.TryGetValue(match.Id, out var score) ? score.HomeScore : match.HomeScore,
+                    AwayScore = scores.TryGetValue(match.Id, out score) ? score.AwayScore : match.AwayScore
+                };
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
@@ -128,75 +163,75 @@ else
             return;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var validTeams = await db.Teams.CountAsync(team => team.TournamentId == model.TournamentId
-            && (team.Id == model.HomeTeamId || team.Id == model.AwayTeamId));
-        if (validTeams != 2)
+        try
         {
-            errorMessage = "Both selected teams must belong to the selected tournament.";
-            return;
-        }
-
-        var match = await db.Matches.FindAsync(Id);
-        if (match is null)
-        {
-            Navigation.NavigateTo("/matches");
-            return;
-        }
-
-        if (model.Status == MatchStatus.Ended)
-        {
-            var goalEvents = await db.MatchEvents
-                .Where(item => item.MatchId == Id
-                    && (item.EventType == MatchEventType.Goal
-                        || item.EventType == MatchEventType.PenaltyGoal
-                        || item.EventType == MatchEventType.OwnGoal))
-                .Select(item => new { item.EventType, ScorerTeamId = item.GoalScorer.TeamId })
-                .ToListAsync();
-
-            var homeEventGoals = 0;
-            var awayEventGoals = 0;
-            foreach (var goalEvent in goalEvents)
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var validTeams = await db.Teams.CountAsync(team => team.TournamentId == model.TournamentId
+                && (team.Id == model.HomeTeamId || team.Id == model.AwayTeamId));
+            if (validTeams != 2)
             {
-                if (goalEvent.ScorerTeamId != model.HomeTeamId && goalEvent.ScorerTeamId != model.AwayTeamId)
+                errorMessage = "Both selected teams must belong to the selected tournament.";
+                return;
+            }
+
+            var match = await db.Matches.FindAsync(Id);
+            if (match is null)
+            {
+                errorMessage = "This match no longer exists.";
+                return;
+            }
+
+            if (model.Status == MatchStatus.Ended)
+            {
+                var teamOverrides = new Dictionary<int, (int HomeTeamId, int AwayTeamId)>
                 {
-                    errorMessage = "Recorded goal events must belong to one of the selected match teams.";
+                    [Id] = (model.HomeTeamId, model.AwayTeamId)
+                };
+                var scores = await MatchScoreCalculator.CalculateAsync(db, new[] { Id }, teamOverrides: teamOverrides);
+                if (!scores.TryGetValue(Id, out var score) || score.ValidationError is not null)
+                {
+                    errorMessage = score?.ValidationError ?? "The score could not be calculated from the recorded goal events.";
                     return;
                 }
 
-                var scoredByHomeTeam = goalEvent.ScorerTeamId == model.HomeTeamId;
-                if (goalEvent.EventType == MatchEventType.OwnGoal)
-                {
-                    if (scoredByHomeTeam) awayEventGoals++;
-                    else homeEventGoals++;
-                }
-                else if (scoredByHomeTeam) homeEventGoals++;
-                else awayEventGoals++;
+                model.HomeScore = score.HomeScore;
+                model.AwayScore = score.AwayScore;
             }
 
-            if (homeEventGoals != model.HomeScore || awayEventGoals != model.AwayScore)
-            {
-                errorMessage = $"The recorded goal events total {homeEventGoals}-{awayEventGoals}, but the match score is {model.HomeScore}-{model.AwayScore}. Update the events or score before ending the match.";
-                return;
-            }
+            match.TournamentId = model.TournamentId; match.HomeTeamId = model.HomeTeamId; match.AwayTeamId = model.AwayTeamId;
+            match.MatchDate = model.MatchDate; match.Location = model.Location; match.Status = model.Status;
+            match.HomeScore = model.HomeScore; match.AwayScore = model.AwayScore;
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/matches?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
+        {
+            errorMessage = exception.Message;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            errorMessage = "This match was changed by someone else. Reload the page before saving again.";
+        }
+        catch (DbUpdateException)
+        {
+            errorMessage = "Unable to save the match. Confirm the tournament and both teams still exist.";
+        }
+        catch
+        {
+            errorMessage = "Unable to save the match. Please try again.";
         }
 
-        match.TournamentId = model.TournamentId; match.HomeTeamId = model.HomeTeamId; match.AwayTeamId = model.AwayTeamId;
-        match.MatchDate = model.MatchDate; match.Location = model.Location; match.Status = model.Status;
-        match.HomeScore = model.HomeScore; match.AwayScore = model.AwayScore;
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/matches");
     }
 
     private sealed class MatchInput
     {
-        [Required] public int TournamentId { get; set; }
-        [Required] public int HomeTeamId { get; set; }
-        [Required] public int AwayTeamId { get; set; }
+        [Required, Range(1, int.MaxValue)] public int TournamentId { get; set; }
+        [Required, Range(1, int.MaxValue)] public int HomeTeamId { get; set; }
+        [Required, Range(1, int.MaxValue)] public int AwayTeamId { get; set; }
         [Required] public DateTime MatchDate { get; set; }
         [StringLength(200)] public string? Location { get; set; }
-        [Range(0, int.MaxValue)] public int HomeScore { get; set; }
-        [Range(0, int.MaxValue)] public int AwayScore { get; set; }
+        public int HomeScore { get; set; }
+        public int AwayScore { get; set; }
         public MatchStatus Status { get; set; }
     }
 

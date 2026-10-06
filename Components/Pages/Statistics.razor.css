@@ -1,0 +1,70 @@
+.statistics-leaderboards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.statistics-leader-card {
+    display: grid;
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--ftms-border);
+    border-radius: 12px;
+    background: var(--ftms-paper);
+}
+
+.statistics-leader {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.statistics-leader span {
+    color: var(--ftms-muted);
+    text-align: right;
+}
+
+.statistics-table th button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+}
+
+.statistics-detail-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.statistics-detail-row > td {
+    background: var(--ftms-paper);
+}
+
+@media (max-width: 800px) {
+    .statistics-leaderboards {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .statistics-leader {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+
+    .statistics-leader span {
+        text-align: left;
+    }
+}

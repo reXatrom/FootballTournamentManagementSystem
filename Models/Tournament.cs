@@ -9,7 +9,7 @@ public enum TournamentStatus
     Completed = 2
 }
 
-public class Tournament
+public class Tournament : IOwnedRecord
 {
     public int Id { get; set; }
 
@@ -33,6 +33,16 @@ public class Tournament
 
     [Required]
     public TournamentStatus Status { get; set; }
+
+    public string CreatedByUserId { get; set; } = null!;
+    public DateTime CreatedAt { get; set; }
+    public string? UpdatedByUserId { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public ApplicationUser CreatedByUser { get; set; } = null!;
+    public ApplicationUser? UpdatedByUser { get; set; }
 
     public ICollection<Team> Teams { get; set; } = new List<Team>();
     public ICollection<Match> Matches { get; set; } = new List<Match>();

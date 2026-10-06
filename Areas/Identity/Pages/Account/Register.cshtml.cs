@@ -22,6 +22,9 @@ public class RegisterModel : PageModel
     [BindProperty]
     public InputModel Input { get; set; } = new();
 
+    [BindProperty(SupportsGet = true)]
+    public string? ReturnUrl { get; set; }
+
     public class InputModel
     {
         [Required]
@@ -73,6 +76,8 @@ public class RegisterModel : PageModel
         await userManager.AddToRoleAsync(user, "Player");
         await signInManager.SignInAsync(user, isPersistent: false);
 
-        return Redirect("/");
+        return Url.IsLocalUrl(ReturnUrl)
+            ? LocalRedirect(ReturnUrl!)
+            : Redirect("/");
     }
 }

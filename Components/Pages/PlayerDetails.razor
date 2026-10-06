@@ -1,0 +1,94 @@
+@page "/players/{Id:int}"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUserDbContextFactory DbFactory
+
+<PageTitle>Player Details</PageTitle>
+
+@if (isLoading)
+{
+    <p>Loading player...</p>
+}
+else if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load player</h2><p>@errorMessage</p></section>
+}
+else if (player is null)
+{
+    <section class="empty-state"><h2>Player not found</h2><a class="btn btn-secondary" href="/players">Back to players</a></section>
+}
+else
+{
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow"><a href="/teams/@player.TeamId">@player.Team.Name</a> · @player.Team.Tournament.Name</p>
+            <h1 class="page-title">@player.FirstName @player.LastName</h1>
+            <p class="page-subtitle">@player.Position · Jersey #@player.JerseyNumber</p>
+            <p class="panel-muted">Created by @player.CreatedByUser.FullName · @player.CreatedAt.ToLocalTime().ToString("g")</p>
+            @if (player.UpdatedAt.HasValue)
+            {
+                <p class="panel-muted">Updated by @player.UpdatedByUser?.FullName · @player.UpdatedAt.Value.ToLocalTime().ToString("g")</p>
+            }
+        </div>
+        <a class="btn btn-secondary" href="/players">Back to players</a>
+    </div>
+
+    <section class="standings-panel">
+        <h2>Match events</h2>
+        @if (events.Count == 0)
+        {
+            <p class="panel-muted">No match events are recorded for this player.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var matchEvent in events)
+                {
+                    <li><a href="/match-events/@matchEvent.Id">@matchEvent.EventType</a> · @matchEvent.Match.HomeTeam.Name vs @matchEvent.Match.AwayTeam.Name · @matchEvent.Match.MatchDate.ToString("MMM d, yyyy")</li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Player? player;
+    private List<MatchEvent> events = new();
+    private string? errorMessage;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            player = await db.Players.AsNoTracking()
+                .Include(item => item.Team).ThenInclude(item => item.Tournament)
+                .Include(item => item.CreatedByUser)
+                .Include(item => item.UpdatedByUser)
+                .SingleOrDefaultAsync(item => item.Id == Id);
+            if (player is not null)
+            {
+                events = await db.MatchEvents.AsNoTracking()
+                    .Include(item => item.Match).ThenInclude(item => item.HomeTeam)
+                    .Include(item => item.Match).ThenInclude(item => item.AwayTeam)
+                    .Where(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id)
+                    .OrderBy(item => item.Match.MatchDate)
+                    .ThenBy(item => item.Minute)
+                    .ToListAsync();
+            }
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

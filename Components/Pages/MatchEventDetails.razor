@@ -1,0 +1,93 @@
+@page "/match-events/{Id:int}"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUserDbContextFactory DbFactory
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Match Event Details</PageTitle>
+
+@if (isLoading)
+{
+    <p>Loading match event...</p>
+}
+else if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load match event</h2><p>@errorMessage</p></section>
+}
+else if (matchEvent is null)
+{
+    <section class="empty-state"><h2>Match event not found</h2><a class="btn btn-secondary" href="/match-events">Back to match events</a></section>
+}
+else
+{
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow"><a href="/matches/@matchEvent.MatchId">@matchEvent.Match.HomeTeam.Name vs @matchEvent.Match.AwayTeam.Name</a></p>
+            <h1 class="page-title">@matchEvent.EventType</h1>
+            <p class="page-subtitle">@matchEvent.Match.Tournament.Name · @matchEvent.Match.MatchDate.ToString("MMM d, yyyy") · @(matchEvent.Minute is null ? "Minute not recorded" : $"{matchEvent.Minute}'")</p>
+            <p class="panel-muted">Created by @matchEvent.CreatedByUser.FullName · @matchEvent.CreatedAt.ToLocalTime().ToString("g")</p>
+            @if (matchEvent.UpdatedAt.HasValue)
+            {
+                <p class="panel-muted">Updated by @matchEvent.UpdatedByUser?.FullName · @matchEvent.UpdatedAt.Value.ToLocalTime().ToString("g")</p>
+            }
+        </div>
+        <a class="btn btn-secondary" href="/match-events">Back to match events</a>
+    </div>
+    <section class="standings-panel">
+        <h2>@matchEvent.GoalScorer.FirstName @matchEvent.GoalScorer.LastName</h2>
+        @if (matchEvent.AssistedByPlayer is not null)
+        {
+            <p>Assisted by @matchEvent.AssistedByPlayer.FirstName @matchEvent.AssistedByPlayer.LastName</p>
+        }
+        @if (CanManage(matchEvent))
+        {
+                <div class="card-actions">
+                    <a href="/match-events/edit/@matchEvent.Id">Edit</a>
+                    <a href="/match-events/delete/@matchEvent.Id">Delete</a>
+                </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private MatchEvent? matchEvent;
+    private string? errorMessage;
+    private bool isLoading = true;
+    private string? currentUserId;
+    private bool isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+            currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            isAdmin = user.IsInRole("Admin");
+            await using var db = await DbFactory.CreateDbContextAsync();
+            matchEvent = await db.MatchEvents.AsNoTracking()
+                .Include(item => item.Match).ThenInclude(item => item.Tournament)
+                .Include(item => item.Match).ThenInclude(item => item.HomeTeam)
+                .Include(item => item.Match).ThenInclude(item => item.AwayTeam)
+                .Include(item => item.GoalScorer)
+                .Include(item => item.AssistedByPlayer)
+                .Include(item => item.CreatedByUser)
+                .Include(item => item.UpdatedByUser)
+                .SingleOrDefaultAsync(item => item.Id == Id);
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private bool CanManage(IOwnedRecord record) => isAdmin || record.CreatedByUserId == currentUserId;
+}

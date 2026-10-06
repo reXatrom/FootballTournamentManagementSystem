@@ -20,6 +20,7 @@
         <h2>Sign up</h2>
         <p class="account-muted">Register to participate in football tournaments.</p>
         <form method="post" class="account-form">
+            <input type="hidden" asp-for="ReturnUrl" />
             <div asp-validation-summary="ModelOnly" class="validation-summary"></div>
 
             <div class="account-field">

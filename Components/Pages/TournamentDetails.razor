@@ -1,0 +1,103 @@
+@page "/tournaments/{Id:int}"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUserDbContextFactory DbFactory
+
+<PageTitle>Tournament Details</PageTitle>
+
+@if (isLoading)
+{
+    <p>Loading tournament...</p>
+}
+else if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load tournament</h2><p>@errorMessage</p></section>
+}
+else if (tournament is null)
+{
+    <section class="empty-state"><h2>Tournament not found</h2><a class="btn btn-secondary" href="/tournaments">Back to tournaments</a></section>
+}
+else
+{
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow">@tournament.Location</p>
+            <h1 class="page-title">@tournament.Name</h1>
+            <p class="page-subtitle">@tournament.StartDate.ToString("MMM d, yyyy") to @tournament.EndDate.ToString("MMM d, yyyy") · @tournament.Status</p>
+            <p class="panel-muted">Created by @tournament.CreatedByUser.FullName · @tournament.CreatedAt.ToLocalTime().ToString("g")</p>
+            @if (tournament.UpdatedAt.HasValue)
+            {
+                <p class="panel-muted">Updated by @tournament.UpdatedByUser?.FullName · @tournament.UpdatedAt.Value.ToLocalTime().ToString("g")</p>
+            }
+        </div>
+        <a class="btn btn-secondary" href="/tournaments">Back to tournaments</a>
+    </div>
+    <p>@tournament.Description</p>
+
+    <section class="standings-panel">
+        <h2>Teams</h2>
+        @if (tournament.Teams.Count == 0)
+        {
+            <p class="panel-muted">No teams have joined this tournament.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var team in tournament.Teams.OrderBy(item => item.Name))
+                {
+                    <li><a href="/teams/@team.Id">@team.Name</a></li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="standings-panel">
+        <h2>Matches</h2>
+        @if (tournament.Matches.Count == 0)
+        {
+            <p class="panel-muted">No matches have been scheduled.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var match in tournament.Matches.OrderBy(item => item.MatchDate))
+                {
+                    <li><a href="/matches/@match.Id">@match.HomeTeam.Name @match.HomeScore - @match.AwayScore @match.AwayTeam.Name</a> · @match.MatchDate.ToString("MMM d, yyyy") · @match.Status</li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Tournament? tournament;
+    private string? errorMessage;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournament = await db.Tournaments.AsNoTracking()
+                .Include(item => item.Teams)
+                .Include(item => item.Matches).ThenInclude(item => item.HomeTeam)
+                .Include(item => item.Matches).ThenInclude(item => item.AwayTeam)
+                .Include(item => item.CreatedByUser)
+                .Include(item => item.UpdatedByUser)
+                .SingleOrDefaultAsync(item => item.Id == Id);
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

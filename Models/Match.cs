@@ -9,7 +9,7 @@ public enum MatchStatus
     Cancelled = 2
 }
 
-public class Match
+public class Match : IOwnedRecord
 {
     public int Id { get; set; }
 
@@ -39,8 +39,17 @@ public class Match
     [Required]
     public MatchStatus Status { get; set; }
 
+    public string CreatedByUserId { get; set; } = null!;
+    public DateTime CreatedAt { get; set; }
+    public string? UpdatedByUserId { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public Tournament Tournament { get; set; } = null!;
     public Team HomeTeam { get; set; } = null!;
     public Team AwayTeam { get; set; } = null!;
+    public ApplicationUser CreatedByUser { get; set; } = null!;
+    public ApplicationUser? UpdatedByUser { get; set; }
     public ICollection<MatchEvent> MatchEvents { get; set; } = new List<MatchEvent>();
 }

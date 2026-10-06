@@ -1,0 +1,102 @@
+@page "/my-records"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUserDbContextFactory DbFactory
+
+<PageTitle>My Records</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Personal workspace</p>
+        <h1 class="page-title">My records</h1>
+        <p class="page-subtitle">Records you own across tournaments, rosters, fixtures, and match events.</p>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Loading your records...</p>
+}
+else if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load your records</h2><p>@errorMessage</p></section>
+}
+else
+{
+    <section class="standings-panel">
+        <h2>Tournaments (@tournaments.Count)</h2>
+        @if (tournaments.Count == 0) { <p class="panel-muted">No tournaments.</p> }
+        else
+        {
+            <ul>@foreach (var item in tournaments) { <li><a href="/tournaments/@item.Id">@item.Name</a> · @item.Status · @item.CreatedAt.ToLocalTime().ToString("g")</li> }</ul>
+        }
+    </section>
+    <section class="standings-panel">
+        <h2>Teams (@teams.Count)</h2>
+        @if (teams.Count == 0) { <p class="panel-muted">No teams.</p> }
+        else
+        {
+            <ul>@foreach (var item in teams) { <li><a href="/teams/@item.Id">@item.Name</a> · @item.Tournament.Name · @item.CreatedAt.ToLocalTime().ToString("g")</li> }</ul>
+        }
+    </section>
+    <section class="standings-panel">
+        <h2>Players (@players.Count)</h2>
+        @if (players.Count == 0) { <p class="panel-muted">No players.</p> }
+        else
+        {
+            <ul>@foreach (var item in players) { <li><a href="/players/@item.Id">@item.FirstName @item.LastName</a> · @item.Team.Name · @item.CreatedAt.ToLocalTime().ToString("g")</li> }</ul>
+        }
+    </section>
+    <section class="standings-panel">
+        <h2>Matches (@matches.Count)</h2>
+        @if (matches.Count == 0) { <p class="panel-muted">No matches.</p> }
+        else
+        {
+            <ul>@foreach (var item in matches) { <li><a href="/matches/@item.Id">@item.HomeTeam.Name vs @item.AwayTeam.Name</a> · @item.Status · @item.CreatedAt.ToLocalTime().ToString("g")</li> }</ul>
+        }
+    </section>
+    <section class="standings-panel">
+        <h2>Match events (@matchEvents.Count)</h2>
+        @if (matchEvents.Count == 0) { <p class="panel-muted">No match events.</p> }
+        else
+        {
+            <ul>@foreach (var item in matchEvents) { <li><a href="/match-events/@item.Id">@item.EventType</a> · @item.Match.HomeTeam.Name vs @item.Match.AwayTeam.Name · @item.CreatedAt.ToLocalTime().ToString("g")</li> }</ul>
+        }
+    </section>
+}
+
+@code {
+    private List<Tournament> tournaments = new();
+    private List<Team> teams = new();
+    private List<Player> players = new();
+    private List<Match> matches = new();
+    private List<MatchEvent> matchEvents = new();
+    private string? errorMessage;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+            teams = await db.Teams.AsNoTracking().Include(item => item.Tournament).OrderBy(item => item.Name).ToListAsync();
+            players = await db.Players.AsNoTracking().Include(item => item.Team).OrderBy(item => item.LastName).ToListAsync();
+            matches = await db.Matches.AsNoTracking().Include(item => item.HomeTeam).Include(item => item.AwayTeam)
+                .OrderByDescending(item => item.MatchDate).ToListAsync();
+            matchEvents = await db.MatchEvents.AsNoTracking().Include(item => item.Match).ThenInclude(item => item.HomeTeam)
+                .Include(item => item.Match).ThenInclude(item => item.AwayTeam)
+                .OrderByDescending(item => item.Match.MatchDate).ThenBy(item => item.Minute).ToListAsync();
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

@@ -1,0 +1,409 @@
+@page "/statistics"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Services
+@inject PlayerStatsService StatsService
+@inject ILogger<Statistics> Logger
+
+<PageTitle>Player Statistics</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Tournament performance</p>
+        <h1 class="page-title">Player statistics</h1>
+        <p class="page-subtitle">Goals, assists, and contributions from completed matches.</p>
+    </div>
+</div>
+
+@if (loadError is not null)
+{
+    <section class="empty-state">
+        <h2>Unable to load player statistics</h2>
+        <p>@loadError</p>
+    </section>
+}
+else if (allStats is null)
+{
+    <p>Loading player statistics...</p>
+}
+else
+{
+    <div class="form-grid statistics-filters" aria-label="Filter player statistics">
+        <div class="form-field">
+            <label for="stats-tournament">Tournament</label>
+            <select id="stats-tournament" value="@selectedTournamentId" @onchange="OnTournamentChanged">
+                <option value="0">All tournaments</option>
+                @foreach (var tournament in allStats
+                    .Select(player => new { player.TournamentId, player.TournamentName })
+                    .DistinctBy(item => item.TournamentId)
+                    .OrderBy(item => item.TournamentName))
+                {
+                    <option value="@tournament.TournamentId">@tournament.TournamentName</option>
+                }
+            </select>
+        </div>
+        <div class="form-field">
+            <label for="stats-team">Team</label>
+            <select id="stats-team" @bind="selectedTeamId">
+                <option value="0">All teams</option>
+                @foreach (var team in FilteredTournamentStats
+                    .Select(player => new { player.TeamId, player.TeamName })
+                    .DistinctBy(item => item.TeamId)
+                    .OrderBy(item => item.TeamName))
+                {
+                    <option value="@team.TeamId">@team.TeamName</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <div class="statistics-leaderboards">
+        <section class="standings-panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">Scoring</p>
+                    <h2>Top goal scorers</h2>
+                </div>
+            </div>
+            @if (isLoadingLeaders)
+            {
+                <p class="panel-muted">Loading scorers...</p>
+            }
+            else if (leaderboardError is not null)
+            {
+                <p class="validation-message">@leaderboardError</p>
+            }
+            else if (topScorers is null || topScorers.Count == 0)
+            {
+                <p class="panel-muted">No goals recorded yet.</p>
+            }
+            else
+            {
+                <div class="statistics-leader-card">
+                    <span class="eyebrow">@(TopScorerLeaders.Count() == 1 ? "Current leader" : "Joint leaders")</span>
+                    @foreach (var leader in TopScorerLeaders)
+                    {
+                        <div class="statistics-leader">
+                            <strong>@leader.PlayerName</strong>
+                            <span>@leader.TeamName · @leader.Goals goals</span>
+                        </div>
+                    }
+                </div>
+                <div class="player-table-wrapper">
+                    <table class="player-table">
+                        <thead>
+                            <tr><th>#</th><th>Player</th><th>Team</th><th>Goals</th><th>Assists</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var (player, index) in topScorers.Select((player, index) => (player, index)))
+                            {
+                                <tr>
+                                    <td>@(index + 1)</td>
+                                    <td><strong>@player.PlayerName</strong></td>
+                                    <td>@player.TeamName</td>
+                                    <td>@player.Goals</td>
+                                    <td>@player.Assists</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="standings-panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">Playmaking</p>
+                    <h2>Top assist providers</h2>
+                </div>
+            </div>
+            @if (isLoadingLeaders)
+            {
+                <p class="panel-muted">Loading assist providers...</p>
+            }
+            else if (leaderboardError is not null)
+            {
+                <p class="validation-message">@leaderboardError</p>
+            }
+            else if (topAssistProviders is null || topAssistProviders.Count == 0)
+            {
+                <p class="panel-muted">No assists recorded yet.</p>
+            }
+            else
+            {
+                <div class="statistics-leader-card">
+                    <span class="eyebrow">@(TopAssistLeaders.Count() == 1 ? "Current leader" : "Joint leaders")</span>
+                    @foreach (var leader in TopAssistLeaders)
+                    {
+                        <div class="statistics-leader">
+                            <strong>@leader.PlayerName</strong>
+                            <span>@leader.TeamName · @leader.Assists assists</span>
+                        </div>
+                    }
+                </div>
+                <div class="player-table-wrapper">
+                    <table class="player-table">
+                        <thead>
+                            <tr><th>#</th><th>Player</th><th>Team</th><th>Assists</th><th>Goals</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var (player, index) in topAssistProviders.Select((player, index) => (player, index)))
+                            {
+                                <tr>
+                                    <td>@(index + 1)</td>
+                                    <td><strong>@player.PlayerName</strong></td>
+                                    <td>@player.TeamName</td>
+                                    <td>@player.Assists</td>
+                                    <td>@player.Goals</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+
+    <section class="standings-panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Player performance</p>
+                <h2>Statistics by player</h2>
+            </div>
+            <span class="panel-muted">@VisibleStats.Count() players</span>
+        </div>
+        @if (allStats.Count == 0)
+        {
+            <p class="panel-muted">No players are available for statistics yet.</p>
+        }
+        else if (!VisibleStats.Any())
+        {
+            <p class="panel-muted">No players match the selected tournament and team.</p>
+        }
+        else
+        {
+            <div class="player-table-wrapper">
+                <table class="player-table statistics-table">
+                    <thead>
+                        <tr>
+                            <th><button type="button" @onclick="() => SortBy(nameof(PlayerStatsDto.PlayerName))">Player @SortMark(nameof(PlayerStatsDto.PlayerName))</button></th>
+                            <th><button type="button" @onclick="() => SortBy(nameof(PlayerStatsDto.TeamName))">Team @SortMark(nameof(PlayerStatsDto.TeamName))</button></th>
+                            <th><button type="button" @onclick="() => SortBy(nameof(PlayerStatsDto.MatchesPlayed))">Matches @SortMark(nameof(PlayerStatsDto.MatchesPlayed))</button></th>
+                            <th><button type="button" @onclick="() => SortBy(nameof(PlayerStatsDto.Goals))">Goals @SortMark(nameof(PlayerStatsDto.Goals))</button></th>
+                            <th><button type="button" @onclick="() => SortBy(nameof(PlayerStatsDto.Assists))">Assists @SortMark(nameof(PlayerStatsDto.Assists))</button></th>
+                            <th><button type="button" @onclick="() => SortBy(nameof(PlayerStatsDto.GoalContributions))">G+A @SortMark(nameof(PlayerStatsDto.GoalContributions))</button></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var player in VisibleStats)
+                        {
+                            <tr>
+                                <td>
+                                    <button type="button" class="statistics-detail-toggle" aria-expanded="@expandedPlayers.Contains(player.PlayerId)" @onclick="() => ToggleDetailsAsync(player.PlayerId)">
+                                        @(expandedPlayers.Contains(player.PlayerId) ? "−" : "+")
+                                        <strong>@player.PlayerName</strong>
+                                    </button>
+                                </td>
+                                <td>@player.TeamName</td>
+                                <td>@player.MatchesPlayed</td>
+                                <td>@player.Goals <span class="panel-muted">(pen @player.PenaltyGoals, OG @player.OwnGoals)</span></td>
+                                <td>@player.Assists</td>
+                                <td><strong>@player.GoalContributions</strong></td>
+                            </tr>
+                            @if (expandedPlayers.Contains(player.PlayerId))
+                            {
+                                <tr class="statistics-detail-row">
+                                    <td colspan="6">
+                                        @if (loadingDetails.Contains(player.PlayerId))
+                                        {
+                                            <p class="panel-muted">Loading match contributions...</p>
+                                        }
+                                        else if (detailErrors.TryGetValue(player.PlayerId, out var detailError))
+                                        {
+                                            <p class="validation-message">@detailError</p>
+                                        }
+                                        else if (!contributions.TryGetValue(player.PlayerId, out var playerContributions) || playerContributions.Count == 0)
+                                        {
+                                            <p class="panel-muted">No goals or assists recorded in Ended matches.</p>
+                                        }
+                                        else
+                                        {
+                                            <div class="event-list">
+                                                @foreach (var contribution in playerContributions)
+                                                {
+                                                    <div class="event-row">
+                                                        <span>@contribution.MatchDate.ToString("MMM d, yyyy")</span>
+                                                        <strong>@contribution.Fixture</strong>
+                                                        <span>@(contribution.Minute.HasValue ? $"{contribution.Minute}'" : "Minute not recorded")</span>
+                                                        <span>@contribution.Contribution</span>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private IReadOnlyList<PlayerStatsDto>? allStats;
+    private IReadOnlyList<PlayerStatsDto>? topScorers;
+    private IReadOnlyList<PlayerStatsDto>? topAssistProviders;
+    private readonly HashSet<int> expandedPlayers = new();
+    private readonly HashSet<int> loadingDetails = new();
+    private readonly Dictionary<int, IReadOnlyList<PlayerMatchContributionDto>> contributions = new();
+    private readonly Dictionary<int, string> detailErrors = new();
+    private int selectedTournamentId;
+    private int selectedTeamId;
+    private string sortColumn = nameof(PlayerStatsDto.PlayerName);
+    private bool sortDescending;
+    private bool isLoadingLeaders;
+    private string? loadError;
+    private string? leaderboardError;
+
+    private IEnumerable<PlayerStatsDto> FilteredTournamentStats => allStats is null
+        ? Enumerable.Empty<PlayerStatsDto>()
+        : selectedTournamentId == 0
+            ? allStats
+            : allStats.Where(player => player.TournamentId == selectedTournamentId);
+
+    private IEnumerable<PlayerStatsDto> VisibleStats
+    {
+        get
+        {
+            var filtered = selectedTeamId == 0
+                ? FilteredTournamentStats
+                : FilteredTournamentStats.Where(player => player.TeamId == selectedTeamId);
+            return sortColumn switch
+            {
+                nameof(PlayerStatsDto.TeamName) => sortDescending
+                    ? filtered.OrderByDescending(player => player.TeamName).ThenBy(player => player.PlayerName)
+                    : filtered.OrderBy(player => player.TeamName).ThenBy(player => player.PlayerName),
+                nameof(PlayerStatsDto.MatchesPlayed) => sortDescending
+                    ? filtered.OrderByDescending(player => player.MatchesPlayed).ThenBy(player => player.PlayerName)
+                    : filtered.OrderBy(player => player.MatchesPlayed).ThenBy(player => player.PlayerName),
+                nameof(PlayerStatsDto.Goals) => sortDescending
+                    ? filtered.OrderByDescending(player => player.Goals).ThenBy(player => player.PlayerName)
+                    : filtered.OrderBy(player => player.Goals).ThenBy(player => player.PlayerName),
+                nameof(PlayerStatsDto.Assists) => sortDescending
+                    ? filtered.OrderByDescending(player => player.Assists).ThenBy(player => player.PlayerName)
+                    : filtered.OrderBy(player => player.Assists).ThenBy(player => player.PlayerName),
+                nameof(PlayerStatsDto.GoalContributions) => sortDescending
+                    ? filtered.OrderByDescending(player => player.GoalContributions).ThenBy(player => player.PlayerName)
+                    : filtered.OrderBy(player => player.GoalContributions).ThenBy(player => player.PlayerName),
+                _ => sortDescending
+                    ? filtered.OrderByDescending(player => player.PlayerName)
+                    : filtered.OrderBy(player => player.PlayerName)
+            };
+        }
+    }
+
+    private IEnumerable<PlayerStatsDto> TopScorerLeaders => topScorers is { Count: > 0 }
+        ? topScorers.TakeWhile(player => player.Goals == topScorers[0].Goals)
+        : Enumerable.Empty<PlayerStatsDto>();
+
+    private IEnumerable<PlayerStatsDto> TopAssistLeaders => topAssistProviders is { Count: > 0 }
+        ? topAssistProviders.TakeWhile(player => player.Assists == topAssistProviders[0].Assists)
+        : Enumerable.Empty<PlayerStatsDto>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            allStats = await StatsService.GetAllPlayerStatsAsync();
+            await LoadLeaderboardsAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Unable to load player statistics.");
+            loadError = "Player statistics are temporarily unavailable. Please try again.";
+        }
+    }
+
+    private async Task OnTournamentChanged(ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out selectedTournamentId))
+        {
+            selectedTournamentId = 0;
+        }
+
+        selectedTeamId = 0;
+        expandedPlayers.Clear();
+        contributions.Clear();
+        detailErrors.Clear();
+        await LoadLeaderboardsAsync();
+    }
+
+    private async Task LoadLeaderboardsAsync()
+    {
+        isLoadingLeaders = true;
+        leaderboardError = null;
+        try
+        {
+            int? tournamentId = selectedTournamentId == 0 ? null : selectedTournamentId;
+            topScorers = await StatsService.GetTopScorersAsync(5, tournamentId);
+            topAssistProviders = await StatsService.GetTopAssistProvidersAsync(5, tournamentId);
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Unable to load player leaderboards.");
+            leaderboardError = "Leaderboards are temporarily unavailable. Please try again.";
+        }
+        finally
+        {
+            isLoadingLeaders = false;
+        }
+    }
+
+    private async Task ToggleDetailsAsync(int playerId)
+    {
+        if (!expandedPlayers.Add(playerId))
+        {
+            expandedPlayers.Remove(playerId);
+            return;
+        }
+
+        if (contributions.ContainsKey(playerId))
+        {
+            return;
+        }
+
+        detailErrors.Remove(playerId);
+        loadingDetails.Add(playerId);
+        try
+        {
+            int? tournamentId = selectedTournamentId == 0 ? null : selectedTournamentId;
+            contributions[playerId] = await StatsService.GetPlayerMatchContributionsAsync(playerId, tournamentId);
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Unable to load match contributions for player {PlayerId}.", playerId);
+            detailErrors[playerId] = "Match contributions are temporarily unavailable. Please try again.";
+        }
+        finally
+        {
+            loadingDetails.Remove(playerId);
+        }
+    }
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column)
+        {
+            sortDescending = !sortDescending;
+            return;
+        }
+
+        sortColumn = column;
+        sortDescending = column != nameof(PlayerStatsDto.PlayerName)
+            && column != nameof(PlayerStatsDto.TeamName);
+    }
+
+    private string SortMark(string column) => sortColumn != column ? string.Empty : sortDescending ? "↓" : "↑";
+}

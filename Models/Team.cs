@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace FootballTournamentManagementSystem.Models;
 
-public class Team
+public class Team : IOwnedRecord
 {
     public int Id { get; set; }
 
@@ -20,8 +20,17 @@ public class Team
 
     public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
 
+    public string CreatedByUserId { get; set; } = null!;
+    public DateTime CreatedAt { get; set; }
+    public string? UpdatedByUserId { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public Tournament Tournament { get; set; } = null!;
     public ApplicationUser? Manager { get; set; }
+    public ApplicationUser CreatedByUser { get; set; } = null!;
+    public ApplicationUser? UpdatedByUser { get; set; }
     public ICollection<Player> Players { get; set; } = new List<Player>();
     public ICollection<Match> HomeMatches { get; set; } = new List<Match>();
     public ICollection<Match> AwayMatches { get; set; } = new List<Match>();

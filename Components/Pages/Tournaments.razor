@@ -4,9 +4,15 @@
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Tournaments</PageTitle>
+
+@if (Saved == "1")
+{
+    <p class="panel-muted">Changes saved.</p>
+}
 
 <div class="page-heading">
     <div>
@@ -14,14 +20,14 @@
         <h1 class="page-title">Tournaments</h1>
         <p class="page-subtitle">Browse upcoming and completed football competitions.</p>
     </div>
-    <AuthorizeView Roles="Administrator,Tournament Manager">
-        <Authorized>
-            <a class="btn btn-primary" href="/tournaments/create">Create tournament</a>
-        </Authorized>
-    </AuthorizeView>
+    <a class="btn btn-primary" href="/tournaments/create">Create tournament</a>
 </div>
 
-@if (tournaments is null)
+@if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load tournaments</h2><p>@errorMessage</p></section>
+}
+else if (tournaments is null)
 {
     <p>Loading tournaments...</p>
 }
@@ -49,28 +55,48 @@ else
                     <span>to</span>
                     <strong>@tournament.EndDate.ToString("MMM d, yyyy")</strong>
                 </div>
-                <AuthorizeView Roles="Administrator,Tournament Manager">
-                    <Authorized>
-                        <div class="card-actions">
+                <p class="panel-muted">Created by @tournament.CreatedByUser.FullName · @tournament.CreatedAt.ToLocalTime().ToString("g")</p>
+                <div class="card-actions">
+                    <a href="/tournaments/@tournament.Id">Details</a>
+                    @if (CanManage(tournament))
+                    {
                             <a href="/tournaments/edit/@tournament.Id">Edit</a>
                             <a href="/tournaments/delete/@tournament.Id">Delete</a>
-                        </div>
-                    </Authorized>
-                </AuthorizeView>
+                    }
+                </div>
             </article>
         }
     </div>
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "saved")]
+    public string? Saved { get; set; }
+
     private List<Tournament>? tournaments;
+    private string? errorMessage;
+    private string? currentUserId;
+    private bool isAdmin;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        tournaments = await db.Tournaments
-            .AsNoTracking()
-            .OrderBy(tournament => tournament.StartDate)
-            .ToListAsync();
+        try
+        {
+            var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+            currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            isAdmin = user.IsInRole("Admin");
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournaments = await db.Tournaments
+                .AsNoTracking()
+                .Include(tournament => tournament.CreatedByUser)
+                .OrderBy(tournament => tournament.StartDate)
+                .ToListAsync();
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
     }
+
+    private bool CanManage(IOwnedRecord record) => isAdmin || record.CreatedByUserId == currentUserId;
 }

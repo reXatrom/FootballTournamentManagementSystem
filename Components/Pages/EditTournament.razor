@@ -1,20 +1,32 @@
 @page "/tournaments/edit/{Id:int}"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using System.ComponentModel.DataAnnotations
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
 
 <PageTitle>Edit Tournament</PageTitle>
 
-@if (model is null)
+@if (isLoading)
 {
     <p>Loading tournament...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load tournament</h2><p>@loadError</p><a href="/tournaments">Back to tournaments</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (model is null)
+{
+    <section class="empty-state"><h2>Tournament not found</h2><a href="/tournaments">Back to tournaments</a></section>
 }
 else
 {
@@ -68,6 +80,10 @@ else
                 <a class="btn btn-secondary" href="/tournaments">Cancel</a>
                 <button class="btn btn-primary" type="submit">Save changes</button>
             </div>
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="validation-message">@errorMessage</p>
+            }
         </EditForm>
     </div>
 }
@@ -77,22 +93,48 @@ else
     public int Id { get; set; }
 
     private TournamentInput? model;
+    private string? errorMessage;
+    private string? loadError;
+    private bool isLoading = true;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var tournament = await db.Tournaments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
-        if (tournament is not null)
+        try
         {
-            model = new TournamentInput
+            var access = await RecordAccessService.CheckAsync<Tournament>(Id);
+            if (access == RecordAccessDecision.Forbidden)
             {
-                Name = tournament.Name,
-                Description = tournament.Description,
-                Location = tournament.Location,
-                StartDate = tournament.StartDate,
-                EndDate = tournament.EndDate,
-                Status = tournament.Status
-            };
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var tournament = await db.Tournaments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+            if (tournament is not null)
+            {
+                model = new TournamentInput
+                {
+                    Name = tournament.Name,
+                    Description = tournament.Description,
+                    Location = tournament.Location,
+                    StartDate = tournament.StartDate,
+                    EndDate = tournament.EndDate,
+                    Status = tournament.Status
+                };
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
@@ -100,26 +142,42 @@ else
     {
         if (model is null || model.EndDate < model.StartDate)
         {
+            errorMessage = "The end date must be on or after the start date.";
             return;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var tournament = await db.Tournaments.FindAsync(Id);
-        if (tournament is null)
+        try
         {
-            Navigation.NavigateTo("/tournaments");
-            return;
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var tournament = await db.Tournaments.FindAsync(Id);
+            if (tournament is null)
+            {
+                errorMessage = "This tournament no longer exists.";
+                return;
+            }
+
+            tournament.Name = model.Name;
+            tournament.Description = model.Description;
+            tournament.Location = model.Location;
+            tournament.StartDate = model.StartDate;
+            tournament.EndDate = model.EndDate;
+            tournament.Status = model.Status;
+
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/tournaments?saved=1");
         }
-
-        tournament.Name = model.Name;
-        tournament.Description = model.Description;
-        tournament.Location = model.Location;
-        tournament.StartDate = model.StartDate;
-        tournament.EndDate = model.EndDate;
-        tournament.Status = model.Status;
-
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/tournaments");
+        catch (RecordAccessDeniedException exception)
+        {
+            errorMessage = exception.Message;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            errorMessage = "This tournament was changed by someone else. Reload the page before saving again.";
+        }
+        catch
+        {
+            errorMessage = "Unable to save the tournament. Please try again.";
+        }
     }
 
     private sealed class TournamentInput

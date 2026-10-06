@@ -1,0 +1,29 @@
+{
+  "tracks": [
+    {
+      "title": "UEFA Champions League Anthem",
+      "artist": "Tony Britten",
+      "src": "/audio/UEFA%20Champions%20League%20Anthem.mp3"
+    },
+    {
+      "title": "Dai Dai",
+      "artist": "Shakira",
+      "src": "/audio/Dai%20Dai.mp3"
+    },
+    {
+      "title": "FIRE",
+      "artist": "MEDUZA, OneRepublic, Leony",
+      "src": "/audio/FIRE.mp3"
+    },
+    {
+      "title": "Papaoutai",
+      "artist": "Stromae",
+      "src": "/audio/Papaoutai.mp3"
+    },
+    {
+      "title": "Akwaba",
+      "artist": "Magic System, Yemi Alade, and Mohamed Ramadan",
+      "src": "/audio/Akwaba.mp3"
+    }
+  ]
+}

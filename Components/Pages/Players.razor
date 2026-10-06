@@ -4,9 +4,15 @@
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Players</PageTitle>
+
+@if (Saved == "1")
+{
+    <p class="panel-muted">Changes saved.</p>
+}
 
 <div class="page-heading">
     <div>
@@ -14,14 +20,14 @@
         <h1 class="page-title">Players</h1>
         <p class="page-subtitle">Browse registered players and their positions.</p>
     </div>
-    <AuthorizeView Roles="Administrator,Tournament Manager">
-        <Authorized>
-            <a class="btn btn-primary" href="/players/create">Add player</a>
-        </Authorized>
-    </AuthorizeView>
+    <a class="btn btn-primary" href="/players/create">Add player</a>
 </div>
 
-@if (players is null)
+@if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load players</h2><p>@errorMessage</p></section>
+}
+else if (players is null)
 {
     <p>Loading players...</p>
 }
@@ -53,6 +59,7 @@ else
                             <th>Player</th>
                             <th>Position</th>
                             <th>Number</th>
+                            <th>Created by</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -63,13 +70,14 @@ else
                                 <td><strong>@player.FirstName @player.LastName</strong></td>
                                 <td>@player.Position</td>
                                 <td><span class="jersey-number">@player.JerseyNumber</span></td>
+                                <td>@player.CreatedByUser.FullName · @player.CreatedAt.ToLocalTime().ToString("g")</td>
                                 <td>
-                                    <AuthorizeView Roles="Administrator,Tournament Manager">
-                                        <Authorized>
+                                    <a href="/players/@player.Id">Details</a>
+                                    @if (CanManage(player))
+                                    {
                                             <a href="/players/edit/@player.Id">Edit</a>
                                             <a href="/players/delete/@player.Id">Delete</a>
-                                        </Authorized>
-                                    </AuthorizeView>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -82,17 +90,36 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "saved")]
+    public string? Saved { get; set; }
+
     private List<Player>? players;
+    private string? errorMessage;
+    private string? currentUserId;
+    private bool isAdmin;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        players = await db.Players
-            .AsNoTracking()
-            .Include(player => player.Team)
-            .ThenInclude(team => team.Tournament)
-            .OrderBy(player => player.Team.Name)
-            .ThenBy(player => player.JerseyNumber)
-            .ToListAsync();
+        try
+        {
+            var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+            currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            isAdmin = user.IsInRole("Admin");
+            await using var db = await DbFactory.CreateDbContextAsync();
+            players = await db.Players
+                .AsNoTracking()
+                .Include(player => player.Team)
+                .ThenInclude(team => team.Tournament)
+                .Include(player => player.CreatedByUser)
+                .OrderBy(player => player.Team.Name)
+                .ThenBy(player => player.JerseyNumber)
+                .ToListAsync();
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
     }
+
+    private bool CanManage(IOwnedRecord record) => isAdmin || record.CreatedByUserId == currentUserId;
 }

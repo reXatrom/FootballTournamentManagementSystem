@@ -3,7 +3,7 @@
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
 
 <PageTitle>Standings</PageTitle>
 
@@ -15,7 +15,11 @@
     </div>
 </div>
 
-@if (tournaments is null)
+@if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load standings</h2><p>@errorMessage</p></section>
+}
+else if (tournaments is null)
 {
     <p>Loading standings...</p>
 }
@@ -141,135 +145,141 @@ else
     private List<Tournament>? tournaments;
     private Dictionary<int, List<StandingsRow>> standingsByTournament = new();
     private Dictionary<int, TournamentLeaders> leadersByTournament = new();
+    private string? errorMessage;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-
-        tournaments = await db.Tournaments
-            .AsNoTracking()
-            .OrderBy(t => t.StartDate)
-            .ToListAsync();
-
-        foreach (var tournament in tournaments)
+        try
         {
-            leadersByTournament[tournament.Id] = new TournamentLeaders();
-            var teams = await db.Teams
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            tournaments = await db.Tournaments
                 .AsNoTracking()
-                .Where(team => team.TournamentId == tournament.Id)
+                .OrderBy(t => t.StartDate)
                 .ToListAsync();
 
-            if (teams.Count == 0)
+            foreach (var tournament in tournaments)
             {
-                standingsByTournament[tournament.Id] = new List<StandingsRow>();
-                continue;
-            }
+                var teams = await db.Teams
+                    .AsNoTracking()
+                    .Where(team => team.TournamentId == tournament.Id)
+                    .ToListAsync();
 
-            var entries = new Dictionary<int, StandingsRow>();
-            foreach (var team in teams)
-            {
-                entries[team.Id] = new StandingsRow
+                if (teams.Count == 0)
                 {
-                    TeamId = team.Id,
-                    TeamName = team.Name,
-                    Played = 0,
-                    Wins = 0,
-                    Draws = 0,
-                    Losses = 0,
-                    GoalsFor = 0,
-                    GoalsAgainst = 0,
-                    GoalDifference = 0,
-                    Points = 0
-                };
-            }
-
-            var matches = await db.Matches
-                .AsNoTracking()
-                .Where(match => match.TournamentId == tournament.Id && match.Status == MatchStatus.Ended)
-                .ToListAsync();
-
-            var goalEvents = await db.MatchEvents
-                .AsNoTracking()
-                .Where(matchEvent => matchEvent.Match.TournamentId == tournament.Id
-                    && matchEvent.Match.Status == MatchStatus.Ended
-                    && (matchEvent.EventType == MatchEventType.Goal || matchEvent.EventType == MatchEventType.PenaltyGoal))
-                .Select(matchEvent => new
-                {
-                    matchEvent.GoalScorerId,
-                    GoalScorerName = matchEvent.GoalScorer.FirstName + " " + matchEvent.GoalScorer.LastName,
-                    GoalScorerTeamName = matchEvent.GoalScorer.Team.Name,
-                    matchEvent.AssistedByPlayerId,
-                    AssistedByPlayerName = matchEvent.AssistedByPlayer == null
-                        ? null
-                        : matchEvent.AssistedByPlayer.FirstName + " " + matchEvent.AssistedByPlayer.LastName,
-                    AssistedByTeamName = matchEvent.AssistedByPlayer == null
-                        ? null
-                        : matchEvent.AssistedByPlayer.Team.Name
-                })
-                .ToListAsync();
-
-            leadersByTournament[tournament.Id] = new TournamentLeaders
-            {
-                GoalScorers = OrderLeaderboard(goalEvents
-                    .GroupBy(goal => new { goal.GoalScorerId, goal.GoalScorerName, goal.GoalScorerTeamName })
-                    .Select(group => new PlayerLeader(group.Key.GoalScorerTeamName, group.Key.GoalScorerName, group.Count()))),
-                AssistProviders = OrderLeaderboard(goalEvents
-                    .Where(goal => goal.AssistedByPlayerId.HasValue && goal.AssistedByPlayerName is not null && goal.AssistedByTeamName is not null)
-                    .GroupBy(goal => new { PlayerId = goal.AssistedByPlayerId!.Value, PlayerName = goal.AssistedByPlayerName!, TeamName = goal.AssistedByTeamName! })
-                    .Select(group => new PlayerLeader(group.Key.TeamName, group.Key.PlayerName, group.Count())))
-            };
-
-            foreach (var match in matches)
-            {
-                if (!entries.TryGetValue(match.HomeTeamId, out var homeRow) || !entries.TryGetValue(match.AwayTeamId, out var awayRow))
-                {
+                    standingsByTournament[tournament.Id] = new List<StandingsRow>();
+                    leadersByTournament[tournament.Id] = new TournamentLeaders();
                     continue;
                 }
 
-                homeRow.Played++;
-                awayRow.Played++;
-                homeRow.GoalsFor += match.HomeScore;
-                homeRow.GoalsAgainst += match.AwayScore;
-                awayRow.GoalsFor += match.AwayScore;
-                awayRow.GoalsAgainst += match.HomeScore;
-
-                if (match.HomeScore > match.AwayScore)
+                var entries = new Dictionary<int, StandingsRow>();
+                foreach (var team in teams)
                 {
-                    homeRow.Wins++;
-                    homeRow.Points += 3;
-                    awayRow.Losses++;
-                }
-                else if (match.HomeScore < match.AwayScore)
-                {
-                    awayRow.Wins++;
-                    awayRow.Points += 3;
-                    homeRow.Losses++;
-                }
-                else
-                {
-                    homeRow.Draws++;
-                    awayRow.Draws++;
-                    homeRow.Points += 1;
-                    awayRow.Points += 1;
+                    entries[team.Id] = new StandingsRow
+                    {
+                        TeamId = team.Id,
+                        TeamName = team.Name,
+                        Played = 0,
+                        Wins = 0,
+                        Draws = 0,
+                        Losses = 0,
+                        GoalsFor = 0,
+                        GoalsAgainst = 0,
+                        GoalDifference = 0,
+                        Points = 0
+                    };
                 }
 
-                homeRow.GoalDifference = homeRow.GoalsFor - homeRow.GoalsAgainst;
-                awayRow.GoalDifference = awayRow.GoalsFor - awayRow.GoalsAgainst;
+                var matches = await db.Matches
+                    .AsNoTracking()
+                    .Where(match => match.TournamentId == tournament.Id && match.Status == MatchStatus.Ended)
+                    .ToListAsync();
+
+                var goalEvents = await db.MatchEvents
+                    .AsNoTracking()
+                    .Where(matchEvent => matchEvent.Match.TournamentId == tournament.Id
+                        && matchEvent.Match.Status == MatchStatus.Ended
+                        && (matchEvent.EventType == MatchEventType.Goal || matchEvent.EventType == MatchEventType.PenaltyGoal))
+                    .Select(matchEvent => new
+                    {
+                        matchEvent.GoalScorerId,
+                        GoalScorerName = matchEvent.GoalScorer.FirstName + " " + matchEvent.GoalScorer.LastName,
+                        GoalScorerTeamName = matchEvent.GoalScorer.Team.Name,
+                        matchEvent.AssistedByPlayerId,
+                        AssistedByPlayerName = matchEvent.AssistedByPlayer == null
+                            ? null
+                            : matchEvent.AssistedByPlayer.FirstName + " " + matchEvent.AssistedByPlayer.LastName,
+                        AssistedByTeamName = matchEvent.AssistedByPlayer == null ? null : matchEvent.AssistedByPlayer.Team.Name
+                    })
+                    .ToListAsync();
+
+                leadersByTournament[tournament.Id] = new TournamentLeaders
+                {
+                    GoalScorers = OrderLeaderboard(goalEvents
+                        .GroupBy(goal => new { goal.GoalScorerId, goal.GoalScorerName, goal.GoalScorerTeamName })
+                        .Select(group => new PlayerLeader(group.Key.GoalScorerTeamName, group.Key.GoalScorerName, group.Count()))),
+                    AssistProviders = OrderLeaderboard(goalEvents
+                        .Where(goal => goal.AssistedByPlayerId.HasValue && goal.AssistedByPlayerName is not null && goal.AssistedByTeamName is not null)
+                        .GroupBy(goal => new { PlayerId = goal.AssistedByPlayerId!.Value, PlayerName = goal.AssistedByPlayerName!, TeamName = goal.AssistedByTeamName! })
+                        .Select(group => new PlayerLeader(group.Key.TeamName, group.Key.PlayerName, group.Count())))
+                };
+
+                foreach (var match in matches)
+                {
+                    if (!entries.TryGetValue(match.HomeTeamId, out var homeRow) || !entries.TryGetValue(match.AwayTeamId, out var awayRow))
+                    {
+                        continue;
+                    }
+
+                    homeRow.Played++;
+                    awayRow.Played++;
+                    homeRow.GoalsFor += match.HomeScore;
+                    homeRow.GoalsAgainst += match.AwayScore;
+                    awayRow.GoalsFor += match.AwayScore;
+                    awayRow.GoalsAgainst += match.HomeScore;
+
+                    if (match.HomeScore > match.AwayScore)
+                    {
+                        homeRow.Wins++;
+                        homeRow.Points += 3;
+                        awayRow.Losses++;
+                    }
+                    else if (match.HomeScore < match.AwayScore)
+                    {
+                        awayRow.Wins++;
+                        awayRow.Points += 3;
+                        homeRow.Losses++;
+                    }
+                    else
+                    {
+                        homeRow.Draws++;
+                        awayRow.Draws++;
+                        homeRow.Points += 1;
+                        awayRow.Points += 1;
+                    }
+
+                    homeRow.GoalDifference = homeRow.GoalsFor - homeRow.GoalsAgainst;
+                    awayRow.GoalDifference = awayRow.GoalsFor - awayRow.GoalsAgainst;
+                }
+
+                var orderedRows = entries.Values
+                    .OrderByDescending(row => row.Points)
+                    .ThenByDescending(row => row.GoalDifference)
+                    .ThenByDescending(row => row.GoalsFor)
+                    .ThenBy(row => row.TeamName)
+                    .ToList();
+
+                for (var index = 0; index < orderedRows.Count; index++)
+                {
+                    orderedRows[index].Position = index + 1;
+                }
+
+                standingsByTournament[tournament.Id] = orderedRows;
             }
-
-            var orderedRows = entries.Values
-                .OrderByDescending(row => row.Points)
-                .ThenByDescending(row => row.GoalDifference)
-                .ThenByDescending(row => row.GoalsFor)
-                .ThenBy(row => row.TeamName)
-                .ToList();
-
-            for (var index = 0; index < orderedRows.Count; index++)
-            {
-                orderedRows[index].Position = index + 1;
-            }
-
-            standingsByTournament[tournament.Id] = orderedRows;
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
         }
     }
 

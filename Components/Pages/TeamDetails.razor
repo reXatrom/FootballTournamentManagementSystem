@@ -1,0 +1,114 @@
+@page "/teams/{Id:int}"
+@rendermode InteractiveServer
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUserDbContextFactory DbFactory
+
+<PageTitle>Team Details</PageTitle>
+
+@if (isLoading)
+{
+    <p>Loading team...</p>
+}
+else if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load team</h2><p>@errorMessage</p></section>
+}
+else if (team is null)
+{
+    <section class="empty-state"><h2>Team not found</h2><a class="btn btn-secondary" href="/teams">Back to teams</a></section>
+}
+else
+{
+    <div class="page-heading">
+        <div>
+            <p class="eyebrow"><a href="/tournaments/@team.TournamentId">@team.Tournament.Name</a></p>
+            <h1 class="page-title">@team.Name</h1>
+            <p class="page-subtitle">@players.Count player(s)</p>
+            <p class="panel-muted">Created by @team.CreatedByUser.FullName · @team.CreatedAt.ToLocalTime().ToString("g")</p>
+            @if (team.UpdatedAt.HasValue)
+            {
+                <p class="panel-muted">Updated by @team.UpdatedByUser?.FullName · @team.UpdatedAt.Value.ToLocalTime().ToString("g")</p>
+            }
+        </div>
+        <a class="btn btn-secondary" href="/teams">Back to teams</a>
+    </div>
+
+    <section class="standings-panel">
+        <h2>Players</h2>
+        @if (players.Count == 0)
+        {
+            <p class="panel-muted">No players are registered for this team.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var player in players.OrderBy(item => item.JerseyNumber))
+                {
+                    <li><a href="/players/@player.Id">#@player.JerseyNumber @player.FirstName @player.LastName</a> · @player.Position</li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="standings-panel">
+        <h2>Matches</h2>
+        @if (matches.Count == 0)
+        {
+            <p class="panel-muted">No matches have been scheduled for this team.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var match in matches.OrderBy(item => item.MatchDate))
+                {
+                    <li><a href="/matches/@match.Id">@match.HomeTeam.Name @match.HomeScore - @match.AwayScore @match.AwayTeam.Name</a> · @match.MatchDate.ToString("MMM d, yyyy") · @match.Status</li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Team? team;
+    private List<Player> players = new();
+    private List<Match> matches = new();
+    private string? errorMessage;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            team = await db.Teams.AsNoTracking()
+                .Include(item => item.Tournament)
+                .Include(item => item.CreatedByUser)
+                .Include(item => item.UpdatedByUser)
+                .SingleOrDefaultAsync(item => item.Id == Id);
+            if (team is not null)
+            {
+                players = await db.Players.AsNoTracking()
+                    .Where(item => item.TeamId == Id)
+                    .OrderBy(item => item.JerseyNumber)
+                    .ToListAsync();
+                matches = await db.Matches.AsNoTracking()
+                    .Include(item => item.HomeTeam)
+                    .Include(item => item.AwayTeam)
+                    .Where(item => item.HomeTeamId == Id || item.AwayTeamId == Id)
+                    .ToListAsync();
+            }
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

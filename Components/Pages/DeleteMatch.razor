@@ -1,18 +1,30 @@
 @page "/matches/delete/{Id:int}"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
 
 <PageTitle>Delete Match</PageTitle>
 
-@if (match is null)
+@if (isLoading)
 {
     <p>Loading match...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load match</h2><p>@loadError</p><a href="/matches">Back to matches</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (match is null)
+{
+    <section class="empty-state"><h2>Match not found</h2><a href="/matches">Back to matches</a></section>
 }
 else
 {
@@ -25,12 +37,16 @@ else
             <p>@match.Tournament.Name · @match.MatchDate.ToString("MMM d, yyyy")</p>
             @if (hasEvents)
             {
-                <p class="validation-message">This match cannot be deleted because it has match events. Remove those events first.</p>
+                <p class="validation-message">@(deleteError ?? "This match cannot be deleted because it has match events. Remove those events first.")</p>
             }
             else
             {
                 <p>This match has no recorded events and can be safely deleted.</p>
                 <button class="btn btn-danger" @onclick="DeleteAsync">Delete match</button>
+            }
+            @if (!string.IsNullOrWhiteSpace(deleteError) && !hasEvents)
+            {
+                <p class="validation-message">@deleteError</p>
             }
             <a class="btn btn-secondary" href="/matches">Cancel</a>
         </section>
@@ -41,37 +57,83 @@ else
     [Parameter] public int Id { get; set; }
     private Match? match;
     private bool hasEvents;
+    private bool isLoading = true;
+    private string? loadError;
+    private string? deleteError;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        match = await db.Matches.AsNoTracking()
-            .Include(item => item.Tournament).Include(item => item.HomeTeam).Include(item => item.AwayTeam)
-            .SingleOrDefaultAsync(item => item.Id == Id);
-        if (match is not null)
+        try
         {
-            hasEvents = await db.MatchEvents.AnyAsync(item => item.MatchId == Id);
+            var access = await RecordAccessService.CheckAsync<Match>(Id);
+            if (access == RecordAccessDecision.Forbidden)
+            {
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            match = await db.Matches.AsNoTracking()
+                .Include(item => item.Tournament).Include(item => item.HomeTeam).Include(item => item.AwayTeam)
+                .SingleOrDefaultAsync(item => item.Id == Id);
+            if (match is not null)
+            {
+                hasEvents = await db.MatchEvents.AnyAsync(item => item.MatchId == Id);
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
     private async Task DeleteAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var matchToDelete = await db.Matches.FindAsync(Id);
-        if (matchToDelete is null)
+        try
         {
-            Navigation.NavigateTo("/matches");
-            return;
-        }
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var matchToDelete = await db.Matches.FindAsync(Id);
+            if (matchToDelete is null)
+            {
+                Navigation.NavigateTo("/matches");
+                return;
+            }
 
-        if (await db.MatchEvents.AnyAsync(item => item.MatchId == Id))
+            if (await db.MatchEvents.AnyAsync(item => item.MatchId == Id))
+            {
+                hasEvents = true;
+                return;
+            }
+
+            db.Matches.Remove(matchToDelete);
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/matches?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
+        {
+            deleteError = exception.Message;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            deleteError = "This match was changed by someone else. Reload before deleting.";
+        }
+        catch (DbUpdateException)
         {
             hasEvents = true;
-            return;
+            deleteError = "Cannot delete this match because match events still reference it.";
         }
-
-        db.Matches.Remove(matchToDelete);
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/matches");
+        catch
+        {
+            deleteError = "Unable to delete the match. Please try again.";
+        }
     }
 }

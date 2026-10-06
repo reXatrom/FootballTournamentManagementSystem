@@ -1,18 +1,21 @@
 @page "/teams/create"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using System.ComponentModel.DataAnnotations
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
 @inject NavigationManager Navigation
 
 <PageTitle>Add Team</PageTitle>
 
-@if (tournaments is null)
+@if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load tournaments</h2><p>@loadError</p></section>
+}
+else if (tournaments is null)
 {
     <p>Loading tournaments...</p>
 }
@@ -73,43 +76,66 @@ else
 @code {
     private List<Tournament>? tournaments;
     private string? errorMessage;
+    private string? loadError;
     private readonly TeamInput model = new();
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        tournaments = await db.Tournaments
-            .AsNoTracking()
-            .OrderBy(tournament => tournament.StartDate)
-            .ToListAsync();
-
-        if (tournaments.Count > 0)
+        try
         {
-            model.TournamentId = tournaments[0].Id;
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournaments = await db.Tournaments
+                .AsNoTracking()
+                .OrderBy(tournament => tournament.StartDate)
+                .ToListAsync();
+
+            if (tournaments.Count > 0)
+            {
+                model.TournamentId = tournaments[0].Id;
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
         }
     }
 
     private async Task SaveTeam()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var duplicateExists = await db.Teams.AnyAsync(team =>
-            team.TournamentId == model.TournamentId && team.Name == model.Name);
-
-        if (duplicateExists)
+        try
         {
-            errorMessage = "A team with this name already exists in the selected tournament.";
-            return;
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var duplicateExists = await db.Teams.AnyAsync(team =>
+                team.TournamentId == model.TournamentId && team.Name == model.Name);
+
+            if (duplicateExists)
+            {
+                errorMessage = "A team with this name already exists in the selected tournament.";
+                return;
+            }
+
+            db.Teams.Add(new Team
+            {
+                Name = model.Name,
+                LogoUrl = string.IsNullOrWhiteSpace(model.LogoUrl) ? null : model.LogoUrl,
+                TournamentId = model.TournamentId
+            });
+
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/teams?saved=1");
         }
-
-        db.Teams.Add(new Team
+        catch (RecordAccessDeniedException exception)
         {
-            Name = model.Name,
-            LogoUrl = string.IsNullOrWhiteSpace(model.LogoUrl) ? null : model.LogoUrl,
-            TournamentId = model.TournamentId
-        });
-
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/teams");
+            errorMessage = exception.Message;
+        }
+        catch (DbUpdateException)
+        {
+            errorMessage = "Unable to save the team. Check that the selected tournament exists and the team name is unique.";
+        }
+        catch
+        {
+            errorMessage = "Unable to save the team. Please try again.";
+        }
     }
 
     private sealed class TeamInput
@@ -117,7 +143,7 @@ else
         [Required, StringLength(150)]
         public string Name { get; set; } = string.Empty;
 
-        [Required]
+        [Required, Range(1, int.MaxValue)]
         public int TournamentId { get; set; }
 
         [Url, StringLength(500)]

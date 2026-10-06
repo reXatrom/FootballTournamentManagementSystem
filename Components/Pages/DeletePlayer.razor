@@ -1,18 +1,30 @@
 @page "/players/delete/{Id:int}"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
 
 <PageTitle>Delete Player</PageTitle>
 
-@if (player is null)
+@if (isLoading)
 {
     <p>Loading player...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load player</h2><p>@loadError</p><a href="/players">Back to players</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (player is null)
+{
+    <section class="empty-state"><h2>Player not found</h2><a href="/players">Back to players</a></section>
 }
 else
 {
@@ -25,12 +37,16 @@ else
             <p>@player.Team.Name - @player.Position, #@player.JerseyNumber</p>
             @if (hasRelatedData)
             {
-                <p class="validation-message">This player cannot be deleted because they are referenced by match events. Remove those events first.</p>
+                <p class="validation-message">@(deleteError ?? "This player cannot be deleted because they are referenced by match events. Remove those events first.")</p>
             }
             else
             {
                 <p>This player has no match events and can be safely deleted.</p>
                 <button class="btn btn-danger" @onclick="DeleteAsync">Delete player</button>
+            }
+            @if (!string.IsNullOrWhiteSpace(deleteError) && !hasRelatedData)
+            {
+                <p class="validation-message">@deleteError</p>
             }
             <a class="btn btn-secondary" href="/players">Cancel</a>
         </section>
@@ -43,35 +59,81 @@ else
 
     private Player? player;
     private bool hasRelatedData;
+    private bool isLoading = true;
+    private string? loadError;
+    private string? deleteError;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        player = await db.Players.AsNoTracking().Include(item => item.Team).SingleOrDefaultAsync(item => item.Id == Id);
-        if (player is not null)
+        try
         {
-            hasRelatedData = await db.MatchEvents.AnyAsync(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id);
+            var access = await RecordAccessService.CheckAsync<Player>(Id);
+            if (access == RecordAccessDecision.Forbidden)
+            {
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            player = await db.Players.AsNoTracking().Include(item => item.Team).SingleOrDefaultAsync(item => item.Id == Id);
+            if (player is not null)
+            {
+                hasRelatedData = await db.MatchEvents.AnyAsync(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id);
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
     private async Task DeleteAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var playerToDelete = await db.Players.FindAsync(Id);
-        if (playerToDelete is null)
+        try
         {
-            Navigation.NavigateTo("/players");
-            return;
-        }
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var playerToDelete = await db.Players.FindAsync(Id);
+            if (playerToDelete is null)
+            {
+                Navigation.NavigateTo("/players");
+                return;
+            }
 
-        if (await db.MatchEvents.AnyAsync(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id))
+            if (await db.MatchEvents.AnyAsync(item => item.GoalScorerId == Id || item.AssistedByPlayerId == Id))
+            {
+                hasRelatedData = true;
+                return;
+            }
+
+            db.Players.Remove(playerToDelete);
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/players?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
+        {
+            deleteError = exception.Message;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            deleteError = "This player was changed by someone else. Reload before deleting.";
+        }
+        catch (DbUpdateException)
         {
             hasRelatedData = true;
-            return;
+            deleteError = "Cannot delete this player because match events still reference them.";
         }
-
-        db.Players.Remove(playerToDelete);
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/players");
+        catch
+        {
+            deleteError = "Unable to delete the player. Please try again.";
+        }
     }
 }

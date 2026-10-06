@@ -1,20 +1,34 @@
 @page "/players/edit/{Id:int}"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using System.ComponentModel.DataAnnotations
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@using Microsoft.Data.SqlClient
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
+@inject ILogger<EditPlayer> Logger
 
 <PageTitle>Edit Player</PageTitle>
 
-@if (model is null)
+@if (isLoading)
 {
     <p>Loading player...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load player</h2><p>@loadError</p><a href="/players">Back to players</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (model is null)
+{
+    <section class="empty-state"><h2>Player not found</h2><a href="/players">Back to players</a></section>
 }
 else
 {
@@ -79,24 +93,49 @@ else
     private PlayerInput? model;
     private List<TeamOption> teams = new();
     private string? errorMessage;
+    private string? loadError;
+    private bool isLoading = true;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        teams = await db.Teams.AsNoTracking().Include(team => team.Tournament).OrderBy(team => team.Name)
-            .Select(team => new TeamOption { Id = team.Id, Name = team.Name, Tournament = team.Tournament.Name })
-            .ToListAsync();
-        var player = await db.Players.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
-        if (player is not null)
+        try
         {
-            model = new PlayerInput
+            var access = await RecordAccessService.CheckAsync<Player>(Id);
+            if (access == RecordAccessDecision.Forbidden)
             {
-                FirstName = player.FirstName,
-                LastName = player.LastName,
-                Position = player.Position,
-                JerseyNumber = player.JerseyNumber,
-                TeamId = player.TeamId
-            };
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            teams = await db.Teams.AsNoTracking().OrderBy(item => item.Name)
+                .Select(team => new TeamOption { Id = team.Id, Name = team.Name, Tournament = team.Tournament.Name })
+                .ToListAsync();
+            var player = await db.Players.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+            if (player is not null)
+            {
+                model = new PlayerInput
+                {
+                    FirstName = player.FirstName,
+                    LastName = player.LastName,
+                    Position = player.Position,
+                    JerseyNumber = player.JerseyNumber,
+                    TeamId = player.TeamId
+                };
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
@@ -107,29 +146,62 @@ else
             return;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var duplicateExists = await db.Players.AnyAsync(player => player.Id != Id
-            && player.TeamId == model.TeamId && player.JerseyNumber == model.JerseyNumber);
-        if (duplicateExists)
+        try
         {
-            errorMessage = "That jersey number is already assigned on the selected team.";
-            return;
-        }
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var duplicateExists = await db.Players.IgnoreQueryFilters().AnyAsync(player => player.Id != Id
+                && player.TeamId == model.TeamId && player.JerseyNumber == model.JerseyNumber);
+            if (duplicateExists)
+            {
+                errorMessage = "That jersey number is already assigned on the selected team.";
+                return;
+            }
 
-        var playerToUpdate = await db.Players.FindAsync(Id);
-        if (playerToUpdate is null)
+            var playerToUpdate = await db.Players.FindAsync(Id);
+            if (playerToUpdate is null)
+            {
+                errorMessage = "This player no longer exists.";
+                return;
+            }
+
+            playerToUpdate.FirstName = model.FirstName;
+            playerToUpdate.LastName = model.LastName;
+            playerToUpdate.Position = model.Position;
+            playerToUpdate.JerseyNumber = model.JerseyNumber;
+            playerToUpdate.TeamId = model.TeamId;
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/players?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
         {
-            Navigation.NavigateTo("/players");
-            return;
+            errorMessage = exception.Message;
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            errorMessage = "This player was changed by someone else. Reload the page before saving again.";
+        }
+        catch (DbUpdateException exception)
+        {
+            Logger.LogError(exception, "Database error while updating player {PlayerId}.", Id);
+            errorMessage = GetSaveErrorMessage(exception);
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Unexpected error while updating player {PlayerId}.", Id);
+            errorMessage = "Unable to save the player. Please try again.";
+        }
+    }
 
-        playerToUpdate.FirstName = model.FirstName;
-        playerToUpdate.LastName = model.LastName;
-        playerToUpdate.Position = model.Position;
-        playerToUpdate.JerseyNumber = model.JerseyNumber;
-        playerToUpdate.TeamId = model.TeamId;
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/players");
+    private static string GetSaveErrorMessage(DbUpdateException exception)
+    {
+        return exception.GetBaseException() is SqlException sqlException
+            ? sqlException.Number switch
+            {
+                2601 or 2627 => "That jersey number is already assigned on the selected team.",
+                547 => "The selected team or another related record is no longer available. Refresh the page and try again.",
+                _ => "Unable to save the player because the database rejected the changes. Please try again."
+            }
+            : "Unable to save the player because the database rejected the changes. Please try again.";
     }
 
     private sealed class PlayerInput
@@ -138,7 +210,7 @@ else
         [Required, StringLength(100)] public string LastName { get; set; } = string.Empty;
         [Required] public PlayerPosition Position { get; set; }
         [Range(1, 99)] public int JerseyNumber { get; set; }
-        [Required] public int TeamId { get; set; }
+        [Required, Range(1, int.MaxValue)] public int TeamId { get; set; }
     }
 
     private sealed class TeamOption

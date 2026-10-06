@@ -1,0 +1,263 @@
+@page "/match-events/edit/{Id:int}"
+@page "/matches/{MatchId:int}/events/edit/{Id:int}"
+@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using FootballTournamentManagementSystem.Data
+@using FootballTournamentManagementSystem.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
+@inject NavigationManager Navigation
+@inject MatchEventValidationService EventValidation
+
+<PageTitle>Edit Match Event</PageTitle>
+
+@if (isLoading)
+{
+    <p>Loading event...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load match event</h2><p>@loadError</p><a href="@(MatchId.HasValue ? $"/matches/{MatchId.Value}" : "/match-events")">Back</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (matchEvent is null || model is null || players is null)
+{
+    <section class="empty-state">
+        <h2>Match event not found</h2>
+        <p>No event exists with that ID for this match.</p>
+        <a class="btn btn-secondary" href="@(MatchId.HasValue ? $"/matches/{MatchId.Value}" : "/match-events")">Back</a>
+    </section>
+}
+else
+{
+    <div class="form-page">
+        <p class="eyebrow">Match detail</p>
+        <h1 class="page-title">Edit match event</h1>
+        <p class="page-subtitle">@matchEvent.Match.HomeTeam.Name vs @matchEvent.Match.AwayTeam.Name</p>
+        <EditForm Model="model" OnValidSubmit="SaveEvent" class="tournament-form">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="event-type">Event type</label>
+                    <InputSelect id="event-type" @bind-Value="model.EventType" @bind-Value:after="OnEventTypeChanged">
+                        <option value="@MatchEventType.Goal">Normal</option>
+                        <option value="@MatchEventType.PenaltyGoal">Penalty</option>
+                        @foreach (var eventType in Enum.GetValues<MatchEventType>().Where(item => item is not MatchEventType.Goal and not MatchEventType.PenaltyGoal))
+                        {
+                            <option value="@eventType">@eventType</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="form-field">
+                    <label for="scorer">Player</label>
+                    <InputSelect id="scorer" @bind-Value="model.GoalScorerId" @bind-Value:after="OnScorerChanged">
+                        @foreach (var player in players)
+                        {
+                            <option value="@player.Id">@player.Name - @player.Team</option>
+                        }
+                    </InputSelect>
+                </div>
+                @if (model.EventType != MatchEventType.OwnGoal)
+                {
+                    <div class="form-field">
+                        <label for="assist">Assist (optional)</label>
+                        <InputSelect id="assist" @bind-Value="model.AssistedByPlayerId">
+                            <option value="">None</option>
+                            @foreach (var player in EligibleAssisters)
+                            {
+                                <option value="@player.Id">@player.Name - @player.Team</option>
+                            }
+                        </InputSelect>
+                    </div>
+                }
+                <div class="form-field">
+                    <label for="minute">Minute</label>
+                    <InputNumber id="minute" @bind-Value="model.Minute" />
+                    <ValidationMessage For="@(() => model.Minute)" />
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="validation-message">@errorMessage</p>
+            }
+            <div class="form-actions">
+                <a class="btn btn-secondary" href="@(MatchId.HasValue ? $"/matches/{MatchId.Value}" : "/match-events")">Cancel</a>
+                <button class="btn btn-primary" type="submit">Save changes</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [Parameter] public int? MatchId { get; set; }
+
+    private MatchEvent? matchEvent;
+    private EventInput? model;
+    private List<PlayerOption>? players;
+    private string? errorMessage;
+    private string? loadError;
+    private bool accessDenied;
+    private bool isLoading = true;
+    private IEnumerable<PlayerOption> EligibleAssisters
+    {
+        get
+        {
+            var scorer = players?.FirstOrDefault(player => player.Id == model?.GoalScorerId);
+            return model?.EventType == MatchEventType.OwnGoal || scorer is null
+                ? Enumerable.Empty<PlayerOption>()
+                : players!.Where(player => player.Id != scorer.Id && player.TeamId == scorer.TeamId);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var access = await RecordAccessService.CheckMatchEventAsync(Id);
+            if (access == RecordAccessDecision.Forbidden)
+            {
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            matchEvent = await db.MatchEvents.AsNoTracking()
+                .Include(item => item.Match).ThenInclude(match => match.HomeTeam)
+                .Include(item => item.Match).ThenInclude(match => match.AwayTeam)
+                .SingleOrDefaultAsync(item => item.Id == Id && (!MatchId.HasValue || item.MatchId == MatchId.Value));
+
+            if (matchEvent is null)
+            {
+                return;
+            }
+
+            model = new EventInput
+            {
+                GoalScorerId = matchEvent.GoalScorerId,
+                AssistedByPlayerId = matchEvent.AssistedByPlayerId,
+                EventType = matchEvent.EventType,
+                Minute = matchEvent.Minute
+            };
+
+            players = await db.Players.AsNoTracking()
+                .Where(item => item.TeamId == matchEvent.Match.HomeTeamId || item.TeamId == matchEvent.Match.AwayTeamId)
+                .OrderBy(item => item.Team.Name).ThenBy(item => item.LastName)
+                .Select(item => new PlayerOption
+                {
+                    Id = item.Id,
+                    Name = item.FirstName + " " + item.LastName,
+                    Team = item.Team.Name,
+                    TeamId = item.TeamId
+                })
+                .ToListAsync();
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+
+    }
+
+    private async Task SaveEvent()
+    {
+        if (model is null || matchEvent is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var validationError = await EventValidation.ValidateAsync(
+                matchEvent.MatchId,
+                model.EventType,
+                model.GoalScorerId,
+                model.AssistedByPlayerId,
+                model.Minute);
+            if (validationError is not null)
+            {
+                errorMessage = validationError;
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var eventToUpdate = await db.MatchEvents.Include(item => item.Match)
+                .SingleOrDefaultAsync(item => item.Id == Id && (!MatchId.HasValue || item.MatchId == MatchId.Value));
+            if (eventToUpdate is null)
+            {
+                errorMessage = "The match event no longer exists.";
+                return;
+            }
+
+            eventToUpdate.GoalScorerId = model.GoalScorerId;
+            eventToUpdate.AssistedByPlayerId = model.AssistedByPlayerId;
+            eventToUpdate.EventType = model.EventType;
+            eventToUpdate.Minute = model.Minute;
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo(MatchId.HasValue ? $"/matches/{eventToUpdate.MatchId}?saved=1" : "/match-events?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
+        {
+            errorMessage = exception.Message;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            errorMessage = "This event was changed by someone else. Reload the page before saving again.";
+        }
+        catch
+        {
+            errorMessage = "Unable to save the event. Please try again.";
+        }
+    }
+
+    private sealed class EventInput
+    {
+        [Required, Range(1, int.MaxValue)] public int GoalScorerId { get; set; }
+        public int? AssistedByPlayerId { get; set; }
+        [Required] public MatchEventType EventType { get; set; }
+        [Range(0, 130)] public int? Minute { get; set; }
+    }
+
+    private sealed class PlayerOption
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Team { get; set; } = string.Empty;
+        public int TeamId { get; set; }
+    }
+
+    private Task OnEventTypeChanged()
+    {
+        if (model?.EventType == MatchEventType.OwnGoal)
+        {
+            model.AssistedByPlayerId = null;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnScorerChanged()
+    {
+        if (model is not null && !EligibleAssisters.Any(player => player.Id == model.AssistedByPlayerId))
+        {
+            model.AssistedByPlayerId = null;
+        }
+
+        return Task.CompletedTask;
+    }
+}

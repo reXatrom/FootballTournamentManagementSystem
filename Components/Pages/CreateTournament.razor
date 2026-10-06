@@ -1,13 +1,12 @@
 @page "/tournaments/create"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using System.ComponentModel.DataAnnotations
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
 @inject NavigationManager Navigation
 
 <PageTitle>Create Tournament</PageTitle>
@@ -67,6 +66,10 @@
             <a class="btn btn-secondary" href="/tournaments">Cancel</a>
             <button class="btn btn-primary" type="submit">Create tournament</button>
         </div>
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <p class="validation-message">@errorMessage</p>
+        }
     </EditForm>
 </div>
 
@@ -77,27 +80,40 @@
         EndDate = DateTime.Today.AddDays(1),
         Status = TournamentStatus.Upcoming
     };
+    private string? errorMessage;
 
     private async Task SaveTournament()
     {
         if (model.EndDate < model.StartDate)
         {
+            errorMessage = "The end date must be on or after the start date.";
             return;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.Tournaments.Add(new Tournament
+        try
         {
-            Name = model.Name,
-            Description = model.Description,
-            Location = model.Location,
-            StartDate = model.StartDate,
-            EndDate = model.EndDate,
-            Status = model.Status
-        });
+            await using var db = await DbFactory.CreateDbContextAsync();
+            db.Tournaments.Add(new Tournament
+            {
+                Name = model.Name,
+                Description = model.Description,
+                Location = model.Location,
+                StartDate = model.StartDate,
+                EndDate = model.EndDate,
+                Status = model.Status
+            });
 
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/tournaments");
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/tournaments?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
+        {
+            errorMessage = exception.Message;
+        }
+        catch
+        {
+            errorMessage = "Unable to save the tournament. Please try again.";
+        }
     }
 
     private sealed class TournamentInput

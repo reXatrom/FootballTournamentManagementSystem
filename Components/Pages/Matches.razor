@@ -2,11 +2,18 @@
 @rendermode InteractiveServer
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
+@using FootballTournamentManagementSystem.Services
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Matches</PageTitle>
+
+@if (Saved == "1")
+{
+    <p class="panel-muted">Changes saved.</p>
+}
 
 <div class="page-heading">
     <div>
@@ -14,14 +21,14 @@
         <h1 class="page-title">Matches</h1>
         <p class="page-subtitle">View scheduled fixtures and completed scores.</p>
     </div>
-    <AuthorizeView Roles="Administrator,Tournament Manager">
-        <Authorized>
-            <a class="btn btn-primary" href="/matches/create">Schedule match</a>
-        </Authorized>
-    </AuthorizeView>
+    <a class="btn btn-primary" href="/matches/create">Schedule match</a>
 </div>
 
-@if (matches is null)
+@if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load matches</h2><p>@errorMessage</p></section>
+}
+else if (matches is null)
 {
     <p>Loading matches...</p>
 }
@@ -84,19 +91,34 @@ else
                         <span>@match.MatchDate.ToString("MMM d, yyyy")</span>
                     </div>
                     <p class="eyebrow">@match.Tournament.Name · @match.Location</p>
+                    <p class="panel-muted">Created by @match.CreatedByUser.FullName · @match.CreatedAt.ToLocalTime().ToString("g")</p>
                     <div class="match-scoreline">
                         <strong>@match.HomeTeam.Name</strong>
-                        <span>@match.HomeScore - @match.AwayScore</span>
+                        @if (match.Status == MatchStatus.Ended && !scoreErrors.ContainsKey(match.Id))
+                        {
+                            <span>@match.HomeScore - @match.AwayScore <small>@GetResult(match)</small></span>
+                        }
+                        else if (match.Status == MatchStatus.Ended)
+                        {
+                            <span>Result unavailable</span>
+                        }
+                        else
+                        {
+                            <span>vs</span>
+                        }
                         <strong>@match.AwayTeam.Name</strong>
                     </div>
+                    @if (scoreErrors.TryGetValue(match.Id, out var scoreError))
+                    {
+                        <p class="validation-message">@scoreError</p>
+                    }
                     <div class="card-actions">
                         <a href="/matches/@match.Id">Details</a>
-                        <AuthorizeView Roles="Administrator,Tournament Manager">
-                            <Authorized>
-                                <a href="/matches/edit/@match.Id">Edit</a>
-                                <a href="/matches/delete/@match.Id">Delete</a>
-                            </Authorized>
-                        </AuthorizeView>
+                        @if (CanManage(match))
+                        {
+                            <a href="/matches/edit/@match.Id">Edit</a>
+                            <a href="/matches/delete/@match.Id">Delete</a>
+                        }
                     </div>
                 </article>
             }
@@ -105,23 +127,58 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "saved")]
+    public string? Saved { get; set; }
+
     private List<Match>? matches;
     private int selectedTournamentId;
     private MatchStatus? selectedStatus;
     private DateTime? startDate;
     private DateTime? endDate;
+    private string? errorMessage;
+    private string? currentUserId;
+    private bool isAdmin;
+    private Dictionary<int, string> scoreErrors = new();
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        matches = await db.Matches
-            .AsNoTracking()
-            .Include(match => match.Tournament)
-            .Include(match => match.HomeTeam)
-            .Include(match => match.AwayTeam)
-            .OrderBy(match => match.MatchDate)
-            .ThenBy(match => match.MatchTime)
-            .ToListAsync();
+        try
+        {
+            var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+            currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            isAdmin = user.IsInRole("Admin");
+            await using var db = await DbFactory.CreateDbContextAsync();
+            matches = await db.Matches
+                .AsNoTracking()
+                .Include(match => match.CreatedByUser)
+                .Include(match => match.Tournament)
+                .Include(match => match.HomeTeam)
+                .Include(match => match.AwayTeam)
+                .OrderBy(match => match.MatchDate)
+                .ThenBy(match => match.MatchTime)
+                .ToListAsync();
+
+            var scores = await MatchScoreCalculator.CalculateAsync(db, matches.Select(match => match.Id));
+            foreach (var match in matches)
+            {
+                if (scores.TryGetValue(match.Id, out var score))
+                {
+                    if (score.ValidationError is not null)
+                    {
+                        scoreErrors[match.Id] = score.ValidationError;
+                    }
+                    else
+                    {
+                        match.HomeScore = score.HomeScore;
+                        match.AwayScore = score.AwayScore;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
     }
 
     private List<Match> GetFilteredMatches()
@@ -154,4 +211,13 @@ else
 
         return filtered.ToList();
     }
+
+    private bool CanManage(IOwnedRecord record) => isAdmin || record.CreatedByUserId == currentUserId;
+
+    private static string GetResult(Match match) => match.HomeScore.CompareTo(match.AwayScore) switch
+    {
+        > 0 => "Home win",
+        < 0 => "Away win",
+        _ => "Draw"
+    };
 }

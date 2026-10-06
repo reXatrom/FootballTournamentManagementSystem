@@ -4,9 +4,15 @@
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Teams</PageTitle>
+
+@if (Saved == "1")
+{
+    <p class="panel-muted">Changes saved.</p>
+}
 
 <div class="page-heading">
     <div>
@@ -14,14 +20,14 @@
         <h1 class="page-title">Teams</h1>
         <p class="page-subtitle">View the teams registered for each competition.</p>
     </div>
-    <AuthorizeView Roles="Administrator,Tournament Manager">
-        <Authorized>
-            <a class="btn btn-primary" href="/teams/create">Add team</a>
-        </Authorized>
-    </AuthorizeView>
+    <a class="btn btn-primary" href="/teams/create">Add team</a>
 </div>
 
-@if (teams is null)
+@if (errorMessage is not null)
+{
+    <section class="empty-state"><h2>Unable to load teams</h2><p>@errorMessage</p></section>
+}
+else if (teams is null)
 {
     <p>Loading teams...</p>
 }
@@ -52,18 +58,28 @@ else
                     @foreach (var team in leagueGroup.OrderBy(item => item.Name))
                     {
                         <article class="team-card">
-                            <div class="team-mark" aria-hidden="true">@team.Name[..1].ToUpperInvariant()</div>
+                            <div class="team-avatar-wrapper">
+                                @if (!string.IsNullOrWhiteSpace(team.LogoUrl) && !failedLogoTeamIds.Contains(team.Id))
+                                {
+                                    <img src="@team.LogoUrl" alt="@($"{team.Name} club logo")" @onerror="@(() => OnLogoError(team.Id))" />
+                                }
+                                else
+                                {
+                                    <span aria-hidden="true">@(string.IsNullOrWhiteSpace(team.Name) ? "?" : team.Name[..1].ToUpperInvariant())</span>
+                                }
+                            </div>
                             <div>
                                 <h3>@team.Name</h3>
                                 <p>@team.Players.Count player(s)</p>
-                                <AuthorizeView Roles="Administrator,Tournament Manager">
-                                    <Authorized>
-                                        <div class="card-actions">
+                                <p class="panel-muted">Created by @team.CreatedByUser.FullName · @team.CreatedAt.ToLocalTime().ToString("g")</p>
+                                <div class="card-actions">
+                                    <a href="/teams/@team.Id">Details</a>
+                                    @if (CanManage(team))
+                                    {
                                             <a href="/teams/edit/@team.Id">Edit</a>
                                             <a href="/teams/delete/@team.Id">Delete</a>
-                                        </div>
-                                    </Authorized>
-                                </AuthorizeView>
+                                    }
+                                </div>
                             </div>
                         </article>
                     }
@@ -74,17 +90,39 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "saved")]
+    public string? Saved { get; set; }
+
     private List<Team>? teams;
+    private string? errorMessage;
+    private string? currentUserId;
+    private bool isAdmin;
+    private readonly HashSet<int> failedLogoTeamIds = new();
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        teams = await db.Teams
-            .AsNoTracking()
-            .Include(team => team.Tournament)
-            .Include(team => team.Players)
-            .OrderBy(team => team.Tournament.Name)
-            .ThenBy(team => team.Name)
-            .ToListAsync();
+        try
+        {
+            var user = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+            currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            isAdmin = user.IsInRole("Admin");
+            await using var db = await DbFactory.CreateDbContextAsync();
+            teams = await db.Teams
+                .AsNoTracking()
+                .Include(team => team.Tournament)
+                .Include(team => team.Players)
+                .Include(team => team.CreatedByUser)
+                .OrderBy(team => team.Tournament.Name)
+                .ThenBy(team => team.Name)
+                .ToListAsync();
+        }
+        catch
+        {
+            errorMessage = "Please try again later.";
+        }
     }
+
+    private bool CanManage(IOwnedRecord record) => isAdmin || record.CreatedByUserId == currentUserId;
+
+    private void OnLogoError(int teamId) => failedLogoTeamIds.Add(teamId);
 }

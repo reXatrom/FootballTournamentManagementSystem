@@ -42,7 +42,7 @@
 
             <button type="submit">Sign in</button>
         </form>
-        <p class="account-switch">New to the tournament desk? <a asp-page="/Account/Register">Create an account</a></p>
+        <p class="account-switch">New to the tournament desk? <a asp-page="/Account/Register" asp-route-ReturnUrl="@Model.ReturnUrl">Create an account</a></p>
     </section>
 </main>
 

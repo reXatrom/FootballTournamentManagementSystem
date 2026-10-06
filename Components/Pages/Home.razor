@@ -3,11 +3,15 @@
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
 
 <PageTitle>Dashboard</PageTitle>
 
-@if (summary is null)
+@if (errorMessage is not null)
+{
+	<section class="empty-state"><h2>Unable to load dashboard</h2><p>@errorMessage</p></section>
+}
+else if (summary is null)
 {
 	<p>Loading dashboard...</p>
 }
@@ -140,84 +144,92 @@ else
 
 @code {
 	private DashboardSummary? summary;
+	private string? errorMessage;
 
 	protected override async Task OnInitializedAsync()
 	{
-		await using var db = await DbFactory.CreateDbContextAsync();
-		var goalEvents = await db.MatchEvents
-			.AsNoTracking()
-			.Where(item => item.Match.Status == MatchStatus.Ended
-				&& (item.EventType == MatchEventType.Goal || item.EventType == MatchEventType.PenaltyGoal))
-			.Select(item => new
-			{
-				TournamentId = item.Match.TournamentId,
-				TournamentName = item.Match.Tournament.Name,
-				TournamentStatus = item.Match.Tournament.Status,
-				TournamentStartDate = item.Match.Tournament.StartDate,
-				GoalScorerId = item.GoalScorerId,
-				GoalScorerName = item.GoalScorer.FirstName + " " + item.GoalScorer.LastName,
-				GoalScorerTeamName = item.GoalScorer.Team.Name,
-				AssistedByPlayerId = item.AssistedByPlayerId,
-				AssistedByPlayerName = item.AssistedByPlayer == null
-					? null
-					: item.AssistedByPlayer.FirstName + " " + item.AssistedByPlayer.LastName,
-				AssistedByTeamName = item.AssistedByPlayer == null ? null : item.AssistedByPlayer.Team.Name
-			})
-			.ToListAsync();
-
-		summary = new DashboardSummary
+		try
 		{
-			Tournaments = await db.Tournaments.CountAsync(),
-			Teams = await db.Teams.CountAsync(),
-			Players = await db.Players.CountAsync(),
-			Matches = await db.Matches.CountAsync(),
-			UpcomingMatches = await db.Matches
+			await using var db = await DbFactory.CreateDbContextAsync();
+			var goalEvents = await db.MatchEvents
 				.AsNoTracking()
-				.Include(match => match.Tournament)
-				.Include(match => match.HomeTeam)
-				.Include(match => match.AwayTeam)
-				.Where(match => match.Status == MatchStatus.Scheduled)
-				.OrderBy(match => match.MatchDate)
-				.Take(4)
-				.ToListAsync(),
-			RecentResults = await db.Matches
-				.AsNoTracking()
-				.Include(match => match.Tournament)
-				.Include(match => match.HomeTeam)
-				.Include(match => match.AwayTeam)
-				.Where(match => match.Status == MatchStatus.Ended)
-				.OrderByDescending(match => match.MatchDate)
-				.ThenByDescending(match => match.MatchTime)
-				.Take(4)
-				.ToListAsync(),
-			CurrentLeaders = goalEvents
-				.GroupBy(item => new { item.TournamentId, item.TournamentName, item.TournamentStatus, item.TournamentStartDate })
-				.Select(group =>
+				.Where(item => item.Match.Status == MatchStatus.Ended
+					&& (item.EventType == MatchEventType.Goal || item.EventType == MatchEventType.PenaltyGoal))
+				.Select(item => new
 				{
-					var scorers = group
-						.GroupBy(item => new { item.GoalScorerId, item.GoalScorerName, item.GoalScorerTeamName })
-						.Select(playerGroup => new LeaderboardPlayer(playerGroup.Key.GoalScorerName, playerGroup.Key.GoalScorerTeamName, playerGroup.Count()))
-						.ToList();
-					var assists = group
-						.Where(item => item.AssistedByPlayerId.HasValue && item.AssistedByPlayerName is not null && item.AssistedByTeamName is not null)
-						.GroupBy(item => new { PlayerId = item.AssistedByPlayerId!.Value, PlayerName = item.AssistedByPlayerName!, TeamName = item.AssistedByTeamName! })
-						.Select(playerGroup => new LeaderboardPlayer(playerGroup.Key.PlayerName, playerGroup.Key.TeamName, playerGroup.Count()))
-						.ToList();
-
-					return new TournamentLeaderSummary
-					{
-						TournamentName = group.Key.TournamentName,
-						TournamentStatus = group.Key.TournamentStatus,
-						TournamentStartDate = group.Key.TournamentStartDate,
-						GoalScorers = GetLeaders(scorers),
-						AssistProviders = GetLeaders(assists)
-					};
+					TournamentId = item.Match.TournamentId,
+					TournamentName = item.Match.Tournament.Name,
+					TournamentStatus = item.Match.Tournament.Status,
+					TournamentStartDate = item.Match.Tournament.StartDate,
+					GoalScorerId = item.GoalScorerId,
+					GoalScorerName = item.GoalScorer.FirstName + " " + item.GoalScorer.LastName,
+					GoalScorerTeamName = item.GoalScorer.Team.Name,
+					AssistedByPlayerId = item.AssistedByPlayerId,
+					AssistedByPlayerName = item.AssistedByPlayer == null
+						? null
+						: item.AssistedByPlayer.FirstName + " " + item.AssistedByPlayer.LastName,
+					AssistedByTeamName = item.AssistedByPlayer == null ? null : item.AssistedByPlayer.Team.Name
 				})
-				.OrderBy(item => item.TournamentStatus == TournamentStatus.Ongoing ? 0 : 1)
-				.ThenByDescending(item => item.TournamentStartDate)
-				.Take(3)
-				.ToList()
-		};
+				.ToListAsync();
+
+			summary = new DashboardSummary
+			{
+				Tournaments = await db.Tournaments.CountAsync(),
+				Teams = await db.Teams.CountAsync(),
+				Players = await db.Players.CountAsync(),
+				Matches = await db.Matches.CountAsync(),
+				UpcomingMatches = await db.Matches
+					.AsNoTracking()
+					.Include(match => match.Tournament)
+					.Include(match => match.HomeTeam)
+					.Include(match => match.AwayTeam)
+					.Where(match => match.Status == MatchStatus.Scheduled)
+					.OrderBy(match => match.MatchDate)
+					.Take(4)
+					.ToListAsync(),
+				RecentResults = await db.Matches
+					.AsNoTracking()
+					.Include(match => match.Tournament)
+					.Include(match => match.HomeTeam)
+					.Include(match => match.AwayTeam)
+					.Where(match => match.Status == MatchStatus.Ended)
+					.OrderByDescending(match => match.MatchDate)
+					.ThenByDescending(match => match.MatchTime)
+					.Take(4)
+					.ToListAsync(),
+				CurrentLeaders = goalEvents
+					.GroupBy(item => new { item.TournamentId, item.TournamentName, item.TournamentStatus, item.TournamentStartDate })
+					.Select(group =>
+					{
+						var scorers = group
+							.GroupBy(item => new { item.GoalScorerId, item.GoalScorerName, item.GoalScorerTeamName })
+							.Select(playerGroup => new LeaderboardPlayer(playerGroup.Key.GoalScorerName, playerGroup.Key.GoalScorerTeamName, playerGroup.Count()))
+							.ToList();
+						var assists = group
+							.Where(item => item.AssistedByPlayerId.HasValue && item.AssistedByPlayerName is not null && item.AssistedByTeamName is not null)
+							.GroupBy(item => new { PlayerId = item.AssistedByPlayerId!.Value, PlayerName = item.AssistedByPlayerName!, TeamName = item.AssistedByTeamName! })
+							.Select(playerGroup => new LeaderboardPlayer(playerGroup.Key.PlayerName, playerGroup.Key.TeamName, playerGroup.Count()))
+							.ToList();
+
+						return new TournamentLeaderSummary
+						{
+							TournamentName = group.Key.TournamentName,
+							TournamentStatus = group.Key.TournamentStatus,
+							TournamentStartDate = group.Key.TournamentStartDate,
+							GoalScorers = GetLeaders(scorers),
+							AssistProviders = GetLeaders(assists)
+						};
+					})
+					.OrderBy(item => item.TournamentStatus == TournamentStatus.Ongoing ? 0 : 1)
+					.ThenByDescending(item => item.TournamentStartDate)
+					.Take(3)
+					.ToList()
+			};
+		}
+		catch
+		{
+			errorMessage = "Please try again later.";
+		}
 	}
 
 	private static List<LeaderboardPlayer> GetLeaders(IEnumerable<LeaderboardPlayer> players)

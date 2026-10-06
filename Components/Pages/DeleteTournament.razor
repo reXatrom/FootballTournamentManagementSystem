@@ -1,18 +1,30 @@
 @page "/tournaments/delete/{Id:int}"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
 
 <PageTitle>Delete Tournament</PageTitle>
 
-@if (tournament is null)
+@if (isLoading)
 {
     <p>Loading tournament...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load tournament</h2><p>@loadError</p><a href="/tournaments">Back to tournaments</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (tournament is null)
+{
+    <section class="empty-state"><h2>Tournament not found</h2><a href="/tournaments">Back to tournaments</a></section>
 }
 else
 {
@@ -26,12 +38,16 @@ else
             <p>@tournament.Location</p>
             @if (hasRelatedData)
             {
-                <p class="validation-message">This tournament cannot be deleted because it has teams or matches. Remove those records first.</p>
+                <p class="validation-message">@(deleteError ?? "This tournament cannot be deleted because it has teams or matches. Remove those records first.")</p>
             }
             else
             {
                 <p>This tournament has no teams or matches and can be safely deleted.</p>
                 <button class="btn btn-danger" @onclick="DeleteAsync">Delete tournament</button>
+            }
+            @if (!string.IsNullOrWhiteSpace(deleteError) && !hasRelatedData)
+            {
+                <p class="validation-message">@deleteError</p>
             }
             <a class="btn btn-secondary" href="/tournaments">Cancel</a>
         </section>
@@ -44,38 +60,84 @@ else
 
     private Tournament? tournament;
     private bool hasRelatedData;
+    private bool isLoading = true;
+    private string? loadError;
+    private string? deleteError;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        tournament = await db.Tournaments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
-        if (tournament is not null)
+        try
         {
-            hasRelatedData = await db.Teams.AnyAsync(team => team.TournamentId == Id)
-                || await db.Matches.AnyAsync(match => match.TournamentId == Id);
+            var access = await RecordAccessService.CheckAsync<Tournament>(Id);
+            if (access == RecordAccessDecision.Forbidden)
+            {
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournament = await db.Tournaments.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+            if (tournament is not null)
+            {
+                hasRelatedData = await db.Teams.AnyAsync(team => team.TournamentId == Id)
+                    || await db.Matches.AnyAsync(match => match.TournamentId == Id);
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
     private async Task DeleteAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var record = await db.Tournaments.FindAsync(Id);
-        if (record is null)
+        try
         {
-            Navigation.NavigateTo("/tournaments");
-            return;
-        }
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var record = await db.Tournaments.FindAsync(Id);
+            if (record is null)
+            {
+                Navigation.NavigateTo("/tournaments");
+                return;
+            }
 
-        var hasTeams = await db.Teams.AnyAsync(team => team.TournamentId == Id);
-        var hasMatches = await db.Matches.AnyAsync(match => match.TournamentId == Id);
-        if (hasTeams || hasMatches)
+            var hasTeams = await db.Teams.AnyAsync(team => team.TournamentId == Id);
+            var hasMatches = await db.Matches.AnyAsync(match => match.TournamentId == Id);
+            if (hasTeams || hasMatches)
+            {
+                hasRelatedData = true;
+                return;
+            }
+
+            db.Tournaments.Remove(record);
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/tournaments?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
+        {
+            deleteError = exception.Message;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            deleteError = "This tournament was changed by someone else. Reload before deleting.";
+        }
+        catch (DbUpdateException)
         {
             hasRelatedData = true;
-            return;
+            deleteError = "Cannot delete this tournament because it still has teams or matches.";
         }
-
-        db.Tournaments.Remove(record);
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/tournaments");
+        catch
+        {
+            deleteError = "Unable to delete the tournament. Please try again.";
+        }
     }
 }

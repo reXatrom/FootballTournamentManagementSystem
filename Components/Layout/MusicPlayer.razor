@@ -1,0 +1,172 @@
+@implements IAsyncDisposable
+@using System.Globalization
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+<section class="music-player" aria-label="Background music player">
+    <div class="music-player-main">
+        <div class="music-player-identity" aria-live="polite">
+            <span class="music-player-equalizer @(state.IsPlaying ? "is-playing" : "")" aria-hidden="true">
+                <i></i><i></i><i></i><i></i>
+            </span>
+            <div class="music-player-track">
+                <strong>@state.Title</strong>
+                <span>@state.Artist</span>
+            </div>
+            @if (state.TrackCount > 0)
+            {
+                <span class="music-player-index">Track @state.TrackNumber of @state.TrackCount</span>
+            }
+        </div>
+        <div class="music-player-controls">
+            <button type="button" @onclick="TogglePlayback" aria-label="@(state.IsPlaying ? "Pause music" : "Play music")" title="@(state.IsPlaying ? "Pause" : "Play")">
+                @if (state.IsPlaying) { <span aria-hidden="true">&#x23F8;</span> } else { <span aria-hidden="true">&#x25B6;</span> }
+            </button>
+            <button type="button" @onclick="NextTrack" aria-label="Play next track" title="Next track"><span aria-hidden="true">&#x23ED;</span></button>
+            <button type="button" @onclick="ToggleMute" aria-label="@(state.IsMuted ? "Unmute music" : "Mute music")" title="@(state.IsMuted ? "Unmute" : "Mute")">
+                @if (state.IsMuted) { <span aria-hidden="true">&#x1F507;</span> } else { <span aria-hidden="true">&#x1F50A;</span> }
+            </button>
+            <label class="music-volume">
+                <span class="visually-hidden">Volume</span>
+                <input type="range" min="0" max="1" step="0.01" value="@state.Volume" style="@VolumeTrackStyle" @oninput="ChangeVolume" aria-label="Music volume" />
+            </label>
+        </div>
+    </div>
+    <div class="music-player-status" aria-live="polite">
+        <span class="music-player-state">@PlaybackStatus</span>
+        @if (state.AutoplayBlocked)
+        {
+            <span class="music-player-hint">Music will start on your first click</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(state.ErrorMessage) || !string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <span class="music-player-error">@(!string.IsNullOrWhiteSpace(state.ErrorMessage) ? state.ErrorMessage : errorMessage)</span>
+        }
+    </div>
+    <div class="music-player-progress">
+        <time>@FormatTime(state.CurrentTime)</time>
+        <input type="range" min="0" max="@Math.Max(1, state.Duration)" step="0.1" value="@Math.Min(state.CurrentTime, state.Duration)" style="@ProgressTrackStyle"
+               @oninput="Seek" aria-label="Track position" aria-valuetext="@FormatTime(state.CurrentTime) of @FormatTime(state.Duration)" disabled="@(state.Duration <= 0)" />
+        <time>@FormatTime(state.Duration)</time>
+    </div>
+</section>
+
+@code {
+    private IJSObjectReference? module;
+    private DotNetObjectReference<MusicPlayer>? objectReference;
+    private MusicPlayerState state = new();
+    private string? errorMessage;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/musicPlayer.js");
+            objectReference = DotNetObjectReference.Create(this);
+            state = await module.InvokeAsync<MusicPlayerState>("init", objectReference) ?? new MusicPlayerState();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (JSException)
+        {
+            errorMessage = "Music controls are unavailable in this session.";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    [JSInvokable]
+    public Task OnMusicPlayerChanged(MusicPlayerState newState)
+    {
+        state = newState;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task TogglePlayback() => InvokePlayerAsync(state.IsPlaying ? "pause" : "resume");
+    private Task NextTrack() => InvokePlayerAsync("next");
+    private Task ToggleMute() => InvokePlayerAsync("toggleMute");
+    private string PlaybackStatus => state.AutoplayBlocked ? "Waiting for interaction" : state.IsPlaying ? "Playing" : "Paused";
+    private string VolumeTrackStyle => $"--range-progress:{(state.IsMuted ? 0 : state.Volume * 100).ToString(CultureInfo.InvariantCulture)}%";
+    private string ProgressTrackStyle => $"--range-progress:{ProgressPercent.ToString(CultureInfo.InvariantCulture)}%";
+    private double ProgressPercent => state.Duration > 0 ? Math.Clamp(state.CurrentTime / state.Duration * 100, 0, 100) : 0;
+
+    private static string FormatTime(double seconds)
+    {
+        if (!double.IsFinite(seconds) || seconds < 0) return "0:00";
+        var wholeSeconds = (int)Math.Min(int.MaxValue, seconds);
+        return $"{wholeSeconds / 60}:{wholeSeconds % 60:D2}";
+    }
+
+    private async Task ChangeVolume(ChangeEventArgs args)
+    {
+        if (double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var volume))
+        {
+            await InvokePlayerAsync("setVolume", volume);
+        }
+    }
+
+    private async Task Seek(ChangeEventArgs args)
+    {
+        if (double.TryParse(args.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var position))
+        {
+            await InvokePlayerAsync("seek", position);
+        }
+    }
+
+    private async Task InvokePlayerAsync(string method, params object?[] arguments)
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await module.InvokeVoidAsync(method, arguments);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        objectReference?.Dispose();
+        if (module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await module.InvokeVoidAsync("destroy");
+            await module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    public sealed class MusicPlayerState
+    {
+        public string Title { get; set; } = "Loading playlist...";
+        public string Artist { get; set; } = string.Empty;
+        public bool IsPlaying { get; set; }
+        public bool IsPaused { get; set; } = true;
+        public double Volume { get; set; } = 0.65;
+        public bool IsMuted { get; set; }
+        public bool AutoplayBlocked { get; set; }
+        public bool HasTrack { get; set; }
+        public int TrackNumber { get; set; }
+        public int TrackCount { get; set; }
+        public double CurrentTime { get; set; }
+        public double Duration { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+    }
+}

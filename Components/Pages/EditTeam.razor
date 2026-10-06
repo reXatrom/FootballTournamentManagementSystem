@@ -1,20 +1,32 @@
 @page "/teams/edit/{Id:int}"
 @rendermode InteractiveServer
-@attribute [Authorize(Roles = "Administrator,Tournament Manager")]
 @using System.ComponentModel.DataAnnotations
 @using FootballTournamentManagementSystem.Data
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
-@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserDbContextFactory DbFactory
+@inject IRecordAccessService RecordAccessService
 @inject NavigationManager Navigation
 
 <PageTitle>Edit Team</PageTitle>
 
-@if (model is null)
+@if (isLoading)
 {
     <p>Loading team...</p>
+}
+else if (loadError is not null)
+{
+    <section class="empty-state"><h2>Unable to load team</h2><p>@loadError</p><a href="/teams">Back to teams</a></section>
+}
+else if (accessDenied)
+{
+    <section class="empty-state"><h2>Access denied</h2><p>You don't have permission to modify this record.</p></section>
+}
+else if (model is null)
+{
+    <section class="empty-state"><h2>Team not found</h2><a href="/teams">Back to teams</a></section>
 }
 else
 {
@@ -66,20 +78,45 @@ else
     private TeamInput? model;
     private List<Tournament> tournaments = new();
     private string? errorMessage;
+    private string? loadError;
+    private bool isLoading = true;
+    private bool accessDenied;
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
-        var team = await db.Teams.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
-        if (team is not null)
+        try
         {
-            model = new TeamInput
+            var access = await RecordAccessService.CheckAsync<Team>(Id);
+            if (access == RecordAccessDecision.Forbidden)
             {
-                Name = team.Name,
-                LogoUrl = team.LogoUrl,
-                TournamentId = team.TournamentId
-            };
+                accessDenied = true;
+                return;
+            }
+            if (access == RecordAccessDecision.NotFound)
+            {
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            tournaments = await db.Tournaments.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+            var team = await db.Teams.AsNoTracking().SingleOrDefaultAsync(item => item.Id == Id);
+            if (team is not null)
+            {
+                model = new TeamInput
+                {
+                    Name = team.Name,
+                    LogoUrl = team.LogoUrl,
+                    TournamentId = team.TournamentId
+                };
+            }
+        }
+        catch
+        {
+            loadError = "Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
@@ -90,27 +127,46 @@ else
             return;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var duplicateExists = await db.Teams.AnyAsync(team =>
-            team.Id != Id && team.TournamentId == model.TournamentId && team.Name == model.Name);
-        if (duplicateExists)
+        try
         {
-            errorMessage = "A team with this name already exists in the selected tournament.";
-            return;
-        }
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var duplicateExists = await db.Teams.AnyAsync(team =>
+                team.Id != Id && team.TournamentId == model.TournamentId && team.Name == model.Name);
+            if (duplicateExists)
+            {
+                errorMessage = "A team with this name already exists in the selected tournament.";
+                return;
+            }
 
-        var teamToUpdate = await db.Teams.FindAsync(Id);
-        if (teamToUpdate is null)
+            var teamToUpdate = await db.Teams.FindAsync(Id);
+            if (teamToUpdate is null)
+            {
+                errorMessage = "This team no longer exists.";
+                return;
+            }
+
+            teamToUpdate.Name = model.Name;
+            teamToUpdate.LogoUrl = string.IsNullOrWhiteSpace(model.LogoUrl) ? null : model.LogoUrl;
+            teamToUpdate.TournamentId = model.TournamentId;
+            await db.SaveChangesAsync();
+            Navigation.NavigateTo("/teams?saved=1");
+        }
+        catch (RecordAccessDeniedException exception)
         {
-            Navigation.NavigateTo("/teams");
-            return;
+            errorMessage = exception.Message;
         }
-
-        teamToUpdate.Name = model.Name;
-        teamToUpdate.LogoUrl = string.IsNullOrWhiteSpace(model.LogoUrl) ? null : model.LogoUrl;
-        teamToUpdate.TournamentId = model.TournamentId;
-        await db.SaveChangesAsync();
-        Navigation.NavigateTo("/teams");
+        catch (DbUpdateConcurrencyException)
+        {
+            errorMessage = "This team was changed by someone else. Reload the page before saving again.";
+        }
+        catch (DbUpdateException)
+        {
+            errorMessage = "Unable to save the team. Check that the selected tournament exists and the team name is unique.";
+        }
+        catch
+        {
+            errorMessage = "Unable to save the team. Please try again.";
+        }
     }
 
     private sealed class TeamInput
@@ -118,7 +174,7 @@ else
         [Required, StringLength(150)]
         public string Name { get; set; } = string.Empty;
 
-        [Required]
+        [Required, Range(1, int.MaxValue)]
         public int TournamentId { get; set; }
 
         [Url, StringLength(500)]

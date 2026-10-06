@@ -10,7 +10,7 @@ public enum PlayerPosition
     Forward = 3
 }
 
-public class Player
+public class Player : IOwnedRecord
 {
     public int Id { get; set; }
 
@@ -33,8 +33,17 @@ public class Player
 
     public string? UserId { get; set; }
 
+    public string CreatedByUserId { get; set; } = null!;
+    public DateTime CreatedAt { get; set; }
+    public string? UpdatedByUserId { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public Team Team { get; set; } = null!;
     public ApplicationUser? User { get; set; }
+    public ApplicationUser CreatedByUser { get; set; } = null!;
+    public ApplicationUser? UpdatedByUser { get; set; }
 
     public ICollection<MatchEvent> GoalsScored { get; set; } = new List<MatchEvent>();
     public ICollection<MatchEvent> AssistsProvided { get; set; } = new List<MatchEvent>();
