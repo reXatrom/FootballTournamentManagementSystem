@@ -438,6 +438,50 @@ h1:focus {
   text-transform: uppercase;
 }
 
+.dashboard-load-error {
+  background: var(--ftms-paper);
+  border: 1px solid var(--ftms-danger);
+  border-left-width: 5px;
+  border-radius: 6px;
+  margin: 2rem auto;
+  max-width: 720px;
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+.application-error-state {
+  background: var(--ftms-paper);
+  border: 1px solid var(--ftms-danger);
+  border-left-width: 5px;
+  border-radius: 6px;
+  margin: 2rem auto;
+  max-width: 720px;
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+.application-error-state h1 {
+  color: var(--ftms-dark);
+  font-family: Georgia, serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  margin: 0.5rem 0;
+}
+
+.application-error-state > p:not(.eyebrow) {
+  color: var(--ftms-muted);
+  margin-bottom: 1.25rem;
+}
+
+.dashboard-load-error h1 {
+  color: var(--ftms-dark);
+  font-family: Georgia, serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  margin: 0.5rem 0;
+}
+
+.dashboard-load-error > p:not(.eyebrow) {
+  color: var(--ftms-muted);
+  margin-bottom: 1.25rem;
+}
+
 .dashboard-hero {
   align-items: center;
   background: linear-gradient(120deg, var(--ftms-dark), #263b66 65%, #2a9d8f);

@@ -4,12 +4,22 @@
 @using FootballTournamentManagementSystem.Models
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ILogger<Home> Logger
 
 <PageTitle>Dashboard</PageTitle>
 
-@if (summary is null)
+@if (summary is null && loadError is not null)
 {
-	<p>Loading dashboard...</p>
+	<section class="dashboard-load-error" role="alert">
+		<p class="eyebrow">Dashboard unavailable</p>
+		<h1>We couldn't load your tournament data.</h1>
+		<p>@loadError</p>
+		<button class="btn btn-primary" type="button" @onclick="LoadDashboardAsync">Try again</button>
+	</section>
+}
+else if (summary is null)
+{
+	<p role="status" aria-live="polite">Loading dashboard...</p>
 }
 else
 {
@@ -140,8 +150,26 @@ else
 
 @code {
 	private DashboardSummary? summary;
+	private string? loadError;
 
-	protected override async Task OnInitializedAsync()
+	protected override Task OnInitializedAsync() => LoadDashboardAsync();
+
+	private async Task LoadDashboardAsync()
+	{
+		loadError = null;
+
+		try
+		{
+			summary = await GetDashboardSummaryAsync();
+		}
+		catch (Exception exception)
+		{
+			Logger.LogError(exception, "Unable to load the dashboard summary.");
+			loadError = "Check the database connection and try again.";
+		}
+	}
+
+	private async Task<DashboardSummary> GetDashboardSummaryAsync()
 	{
 		await using var db = await DbFactory.CreateDbContextAsync();
 		var goalEvents = await db.MatchEvents
@@ -165,7 +193,7 @@ else
 			})
 			.ToListAsync();
 
-		summary = new DashboardSummary
+		return new DashboardSummary
 		{
 			Tournaments = await db.Tournaments.CountAsync(),
 			Teams = await db.Teams.CountAsync(),

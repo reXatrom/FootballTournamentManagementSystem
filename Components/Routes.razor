@@ -1,6 +1,24 @@
 ﻿<Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <ErrorBoundary @ref="errorBoundary">
+            <ChildContent>
+                <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+            </ChildContent>
+            <ErrorContent>
+                <section class="application-error-state" role="alert">
+                    <p class="eyebrow">Something went wrong</p>
+                    <h1>This page could not be displayed.</h1>
+                    <p>Please retry the page. If the problem persists, contact the system administrator.</p>
+                    <button class="btn btn-primary" type="button" @onclick="RetryPage">Try again</button>
+                </section>
+            </ErrorContent>
+        </ErrorBoundary>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    private ErrorBoundary? errorBoundary;
+
+    private void RetryPage() => errorBoundary?.Recover();
+}
